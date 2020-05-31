@@ -1,14 +1,10 @@
 package com.github.scaars10.pecan;
 
-import com.github.scaars10.pecan.RMI.ClientRmiClass;
-import com.github.scaars10.pecan.RMI.ServerRmiClass;
+import com.github.scaars10.pecan.structures.LogEntry;
 
-import java.util.Random;
 
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
+import java.util.ArrayList;
+
 
 /**
  * The type Pecan node.
@@ -16,6 +12,11 @@ import java.util.concurrent.TimeUnit;
 public class PecanNode {
 
 
+    //interval after which leader sends a heartbeat
+    int heartbeat = 50;
+
+    //interval after which follower is allowed to become a candidate if a heartbeat is not received from leader
+    int leaderTimeout = 1000;
     /**
      * All possible States
      */
@@ -42,20 +43,19 @@ public class PecanNode {
      * Id of known leader according to this node
      */
     int leaderId;
+    int votedFor = 0;
     /**
      * Current term according to this node
      */
     long currentTerm = 0;
-    /**
-     * The Election timer.
-     */
-    ScheduledExecutorService electionTimer =
-            Executors.newScheduledThreadPool(1);
-
+    ArrayList<LogEntry> log = new ArrayList<LogEntry>();
+    int commitIndex = -1;
+    int lastApplied = -1;
     /**
      * Stores the ids of peers
      */
     int []peerId;
+
     /**
      * Initial Node state. All nodes are followers in the beginning.
      */
@@ -65,45 +65,15 @@ public class PecanNode {
      * Instantiates a new Pecan node.
      *
      * @param id     the id
-     * @param peerId the peer id
+     * @param peerId list of peer id(all nodes including itself)
      */
-    ClientRmiClass clientRaft;
-    ServerRmiClass serverRaft;
+
     PecanNode(int id, int []peerId){
         this.id = id;
         this.peerId = peerId;
     }
 
-    /**
-     * Class for a thread to run in parallel when timer on the node times out and election starts.
-     */
 
-    class StartElection implements Runnable{
-        public void run(){
-            System.out.println("Timed out. No heartbeat received. Starting a new election");
-            nodeState = possibleStates.CANDIDATE;
-            //Startup Election
-        }
-    }
-
-    /**
-     * The type Heartbeat timer.
-     */
-    class ElectionTimer{
-        /**
-         * The Rand.
-         */
-        Random rand= new Random();
-        /**
-         * The Random time.
-         */
-        int randomTime = (int) (150 + rand.nextDouble()*150);
-        /**
-         * The Election.
-         */
-        ScheduledFuture election = electionTimer.schedule(new StartElection(),
-                randomTime, TimeUnit.MILLISECONDS);
-    }
 
 
 }
