@@ -4,6 +4,8 @@ import com.github.scaars10.pecan.structures.LogEntry;
 
 
 import java.util.ArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 
 /**
@@ -11,7 +13,7 @@ import java.util.ArrayList;
  */
 public class PecanNode {
 
-
+    ReentrantReadWriteLock nodeLock = new ReentrantReadWriteLock();
     //interval after which leader sends a heartbeat
     int heartbeat = 50;
 
@@ -43,7 +45,7 @@ public class PecanNode {
      * Id of known leader according to this node
      */
     int leaderId;
-    int votedFor = 0;
+    AtomicInteger votedFor = new AtomicInteger();
     /**
      * Current term according to this node
      */
