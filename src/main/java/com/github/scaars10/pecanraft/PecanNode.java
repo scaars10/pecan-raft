@@ -1,6 +1,6 @@
-package com.github.scaars10.pecan;
+package com.github.scaars10.pecanraft;
 
-import com.github.scaars10.pecan.structures.LogEntry;
+import com.github.scaars10.pecanraft.structures.LogEntry;
 
 
 import java.util.ArrayList;

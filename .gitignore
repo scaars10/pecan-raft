@@ -1,1 +1,9 @@
 .idea/
+build
+gradle
+.gradle
+pecanRaft.iml
+pecanRaft.ipr
+pecanRaft.iws
+gradlew.bat
+gradlew

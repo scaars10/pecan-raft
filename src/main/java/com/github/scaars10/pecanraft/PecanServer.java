@@ -1,8 +1,8 @@
-package com.github.scaars10.pecan;
+package com.github.scaars10.pecanraft;
 
 
-import com.github.scaars10.pecan.RMI.RmiInterface;
-import com.github.scaars10.pecan.structures.LogEntry;
+
+import com.github.scaars10.pecanraft.structures.LogEntry;
 
 import java.net.MalformedURLException;
 import java.rmi.Naming;
@@ -52,7 +52,7 @@ public class PecanServer extends UnicastRemoteObject implements RmiInterface, Ru
     }
     void startFollower()
     {
-        
+
         startElectionTimer();
     }
     void startElection()
@@ -61,7 +61,7 @@ public class PecanServer extends UnicastRemoteObject implements RmiInterface, Ru
         System.out.println("Timed out. No heartbeat received from leader with (id-"+node.leaderId+"). Starting a new election");
 
         //obtain a writelock to ensure safety
-        node.nodeLock.readLock().lock();
+        node.nodeLock.writeLock().lock();
         //change the state to candidate
         node.nodeState = PecanNode.possibleStates.CANDIDATE;
         node.votedFor.set(node.id);
@@ -71,7 +71,7 @@ public class PecanServer extends UnicastRemoteObject implements RmiInterface, Ru
             lastLogTerm = node.log.get(node.log.size()-1).getTerm();
         }
         //release the writelock
-        node.nodeLock.readLock().lock();
+        node.nodeLock.writeLock().lock();
 
         final ExecutorService exec = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors()*2);
 
@@ -112,7 +112,7 @@ public class PecanServer extends UnicastRemoteObject implements RmiInterface, Ru
             futures.add(future);
 
         }
-        for(int i=0;i<100;i++)
+        for(int i=0;i<50;i++)
         {
             try
             {

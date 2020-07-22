@@ -1,4 +1,4 @@
-package com.github.scaars10.pecan.structures;
+package com.github.scaars10.pecanraft.structures;
 
 public class LogEntry {
     int term,key,value;
