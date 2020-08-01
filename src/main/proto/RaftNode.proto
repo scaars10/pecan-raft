@@ -43,6 +43,7 @@ message RequestVoteResponse
 {
   bool voteGranted = 1;
   int64 term = 2;
+  int32 leaderId = 3;
 }
 
 

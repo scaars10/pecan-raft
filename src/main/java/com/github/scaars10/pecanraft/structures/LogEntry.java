@@ -16,4 +16,16 @@ public class LogEntry {
     public long getTerm() {
         return term;
     }
+
+    public long getIndex() {
+        return index;
+    }
+
+    public int getKey() {
+        return key;
+    }
+
+    public int getValue() {
+        return value;
+    }
 }

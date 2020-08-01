@@ -100,7 +100,21 @@ public class PecanNode {
 
     }
 
-
+    public LogEntry getLastLog()
+    {
+        if(uncommittedLog.size()>0)
+        {
+            return uncommittedLog.get(uncommittedLog.size()-1);
+        }
+        else
+        {
+            return committedLog.get(committedLog.size()-1);
+        }
+    }
+    public LogEntry getLastCommittedLog()
+    {
+        return committedLog.get(committedLog.size()-1);
+    }
 
 
 }

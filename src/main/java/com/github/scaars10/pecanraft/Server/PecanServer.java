@@ -7,9 +7,12 @@ import com.github.scaars10.pecanRaft.ClientResponse;
 import com.github.scaars10.pecanraft.*;
 import com.github.scaars10.pecanraft.AppendEntriesRequest;
 import com.github.scaars10.pecanraft.AppendEntriesResponse;
+import com.github.scaars10.pecanraft.RequestVoteRequest;
 import com.github.scaars10.pecanraft.RequestVoteResponse;
 import com.github.scaars10.pecanraft.RpcLogEntry;
 import com.github.scaars10.pecanraft.structures.LogEntry;
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import io.grpc.stub.StreamObserver;
@@ -25,6 +28,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public class PecanServer {
     RaftServiceImpl raftService;
+    RaftGrpcServiceClient rpcClient;
     Thread serverThread;
 
     PecanNode node;
@@ -62,9 +66,9 @@ public class PecanServer {
 
         this.node = new PecanNode(id, peerId);
         this.raftService = new RaftServiceImpl(node);
-
+        this.rpcClient = new RaftGrpcServiceClient(node);
         startServer();
-        System.out.println("Object for node"+id+" created");
+        System.out.println("Object for node "+id+" created");
     }
 
 
@@ -112,17 +116,23 @@ public class PecanServer {
                 continue;
 
             int finalI = i;
-            long finalLastLogTerm = lastLogTerm;
+
             final Future<?> future = exec.submit(() -> {
 
                 try {
-                    int response = 0;
+
+
+                    RequestVoteResponse res = rpcClient.requestVote("localhost", node.peerId[finalI]);
                     //Request vote from peer [i]
 //                    RmiInterface peer = (RmiInterface) Naming.lookup("Node-" + node.peerId[finalI]);
 //
 //                    int response = peer.RequestVote(node.currentTerm, node.id, node.commitIndex, finalLastLogTerm);
-                    if (response == 0) {
+                    if (res.getVoteGranted()) {
                         voteCount.incrementAndGet();
+                    }
+                    else
+                    {
+                        updateStatus(res.getTerm(), -1, -1);
                     }
                 }
                 //catching Exceptions
@@ -134,11 +144,11 @@ public class PecanServer {
             futures.add(future);
 
         }
-        for(int i=0;i<50;i++)
+        for(int i=0;i<70;i++)
         {
             try
             {
-                Thread.sleep(10);
+                Thread.sleep(20);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
@@ -177,41 +187,6 @@ public class PecanServer {
     }
 
 
-
-
-
-
-//    @Override
-//    public int AppendEntries(long term, int leaderId, long prevLogIndex, long prevLogTerm,
-//                             LogEntry[] entries, long commitIndex)
-//    {
-//        node.nodeLock.readLock().lock();
-//        if(checkIfServerIsBehind(term, prevLogIndex, prevLogTerm))
-//        {
-//            node.nodeLock.readLock().unlock();
-//            return -1;
-//        }
-//        return 0;
-//    }
-
-//    public int RequestVote(long term, int candidateId, long prevLogIndex, long prevLogTerm)
-//    {
-//        node.nodeLock.writeLock().lock();
-//        int res = -1;
-//        if(node.votedFor.get()==0 || node.votedFor.get()==candidateId || !checkIfServerIsBehind(term, prevLogIndex, prevLogTerm))
-//        {
-//            node.votedFor.set(candidateId);
-//            res = 0;
-//        }
-//        node.nodeLock.writeLock().unlock();
-//        if(res==0)
-//        {
-//            stopElectionTimer();
-//            startElectionTimer();
-//        }
-//        return res;
-//    }
-
     void  startElectionTimer()
     {
         Random rand= new Random();
@@ -248,16 +223,18 @@ public class PecanServer {
         startFollower();
 
     }
-//    public static void main(String[] args)  {
-//        int peerId[] = new int[1];
-//        try {
-//            PecanServer server = new PecanServer(0, peerId);
-//        } catch (Exception e)
-//        {
-//            System.out.println("Error while creating object");
-//            e.printStackTrace();
-//        }
-//    }
+
+    public void updateStatus(long term, int leaderId, int votedFor)
+    {
+        node.currentTerm = term;
+        node.nodeState = PecanNode.possibleStates.FOLLOWER;
+        node.leaderId = leaderId;
+        if(votedFor>=0)
+            node.votedFor.set(votedFor);
+        else
+            node.votedFor = null;
+    }
+
 
     public class RaftServiceImpl extends RaftNodeRpcGrpc.RaftNodeRpcImplBase {
         PecanNode node;
@@ -268,7 +245,7 @@ public class PecanServer {
         //returns true if the server making the request is behind
         boolean checkIfServerIsBehind(long term, long lastIndex, long lastLogTerm)
         {
-            return node.currentTerm > term || ((node.lastApplied > lastIndex) &&
+            return node.currentTerm > term || ((node.commitIndex > lastIndex) &&
                     (node.committedLog.get(node.committedLog.size()-1).
                             getTerm() >= lastLogTerm));
         }
@@ -279,7 +256,7 @@ public class PecanServer {
             StreamObserver <AppendEntriesRequest> streamObserver = new StreamObserver<AppendEntriesRequest>() {
                 @Override
                 public void onNext(AppendEntriesRequest value) {
-                    restartElectionTimer();
+
                     long term = value.getTerm();
                     if(node.currentTerm>term)
                     {
@@ -344,7 +321,7 @@ public class PecanServer {
                 @Override
                 public void onCompleted()
                 {
-                    
+
                 }
             };
             return streamObserver;
@@ -352,15 +329,23 @@ public class PecanServer {
 
         @Override
         public void requestVote(com.github.scaars10.pecanraft.RequestVoteRequest request,
-                StreamObserver<com.github.scaars10.pecanraft.RequestVoteResponse> responseObserver) {
+                StreamObserver<com.github.scaars10.pecanraft.RequestVoteResponse> responseObserver)
+        {
             long candidateTerm = request.getTerm(), lastLogIndex = request.getLastLogIndex(),
             lastLogTerm = request.getLastLogTerm();
             int candidateId = request.getCandidateId();
             com.github.scaars10.pecanraft.RequestVoteResponse response;
+
+            if(node.currentTerm<request.getTerm())
+            {
+                updateStatus(request.getTerm(), node.leaderId, -1);
+            }
+
             if(((node.votedFor.get()==candidateId) || (node.votedFor == null))
-             && (checkIfServerIsBehind(candidateTerm, lastLogIndex, lastLogTerm)))
+             && (!checkIfServerIsBehind(candidateTerm, lastLogIndex, lastLogTerm)))
             {
                 response = RequestVoteResponse.newBuilder().setVoteGranted(true).build();
+                updateStatus(request.getTerm(), request.getCandidateId(), request.getCandidateId());
 
             }
             else
@@ -392,6 +377,30 @@ public class PecanServer {
             }
             responseObserver.onNext(response);
             responseObserver.onCompleted();
+        }
+    }
+
+    public class RaftGrpcServiceClient
+    {
+        PecanNode node;
+        public RaftGrpcServiceClient(PecanNode node)
+        {
+            this.node = node;
+        }
+
+        public RequestVoteResponse requestVote(String address, int port)
+        {
+            ManagedChannel channel = ManagedChannelBuilder.forAddress(address, port)
+                    .usePlaintext()
+                    .build();
+
+            RaftNodeRpcGrpc.RaftNodeRpcBlockingStub client = RaftNodeRpcGrpc.newBlockingStub(channel);
+            LogEntry lastLog = node.getLastCommittedLog();
+            RequestVoteRequest req = RequestVoteRequest.newBuilder().
+                    setCandidateId(node.id).setTerm(node.currentTerm).setLastLogIndex(lastLog.getIndex()).
+                    setLastLogTerm(lastLog.getTerm()).build();
+            return client.requestVote(req);
+
         }
     }
 }
