@@ -1,9 +1,11 @@
-package com.github.scaars10.pecanraft;
+package com.github.scaars10.pecanraft.Server;
 
+import com.github.scaars10.pecanraft.RpcLogEntry;
 import com.github.scaars10.pecanraft.structures.LogEntry;
 
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -50,8 +52,9 @@ public class PecanNode {
      * Current term according to this node
      */
     long currentTerm = 0;
-    ArrayList<LogEntry> log = new ArrayList<LogEntry>();
-    int commitIndex = -1;
+    ArrayList<LogEntry> committedLog = new ArrayList<LogEntry>();
+    ArrayList<LogEntry> uncommittedLog = new ArrayList<LogEntry>();
+    long commitIndex = -1, index = -1;
     int lastApplied = -1;
     /**
      * Stores the ids of peers
@@ -63,16 +66,38 @@ public class PecanNode {
      */
     possibleStates nodeState = possibleStates.FOLLOWER;
 
-    /**
-     * Instantiates a new Pecan node.
-     *
-     * @param id     the id
-     * @param peerId list of peer id(all nodes including itself)
-     */
-
-    PecanNode(int id, int []peerId){
+    //Method to add new entries to uncommitted log
+    public void addToUncommittedLog(int key, int value)
+    {
+        index++;
+        uncommittedLog.add(new LogEntry(currentTerm, key, value, index));
+    }
+    public PecanNode(int id, int []peerId){
         this.id = id;
         this.peerId = peerId;
+    }
+
+    public LogEntry getLog(long searchIndex)
+    {
+        if(searchIndex<=commitIndex)
+        {
+            return committedLog.get((int)searchIndex);
+        }
+        if(searchIndex>commitIndex+uncommittedLog.size())
+        {
+            return null;
+        }
+        return uncommittedLog.get((int)(searchIndex - commitIndex-1)
+        );
+    }
+    public void persistToDb(long commitIndex)
+    {
+
+    }
+
+    public void updateUncommittedLog(List<RpcLogEntry> list, long matchIndex)
+    {
+
     }
 
 

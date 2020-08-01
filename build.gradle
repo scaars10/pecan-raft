@@ -38,6 +38,10 @@ dependencies {
 
     // https://mvnrepository.com/artifact/org.mongodb/mongodb-driver-sync
     compile group: 'org.mongodb', name: 'mongodb-driver-sync', version: '3.8.2'
+    // https://mvnrepository.com/artifact/com.h2database/h2
+    testCompile group: 'com.h2database', name: 'h2', version: '1.3.148'
+
+
 }
 
 // if you have source imports issues, add the below

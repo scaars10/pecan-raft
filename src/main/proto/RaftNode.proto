@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+import "client.proto";
+
+option java_multiple_files = true;
+option java_package = "com.github.scaars10.pecanraft";
+
+message RpcLogEntry
+{
+  int64 index = 4;
+  int64 term = 1;
+  int64 key = 2;
+  int64 value = 3;
+}
+message AppendEntriesRequest
+{
+  int64 term = 1;
+  int32 leaderId = 2;
+  int64 commitIndex = 3;
+  int64 prevLogIndex = 4;
+  int64 prevLogTerm = 5;
+  repeated RpcLogEntry logEntries = 6;
+
+}
+
+message AppendEntriesResponse
+{
+  enum ResponseCodes {SUCCESS = 0; MORE = 1; OUTDATED = 2; }; //0 for success, 1 for more logs needed, 2 for node no longer leader
+  int64 term = 2;
+  ResponseCodes responseCode = 1;
+  int64 matchIndex = 3;
+}
+
+message RequestVoteRequest
+{
+  int64 term = 1;
+  int32 candidateId = 2;
+  int64 lastLogIndex = 3;
+  int64 lastLogTerm = 4;
+}
+
+message RequestVoteResponse
+{
+  bool voteGranted = 1;
+  int64 term = 2;
+}
+
+
+service RaftNodeRpc{
+  rpc AppendEntries (stream AppendEntriesRequest) returns (stream AppendEntriesResponse) {};
+  rpc RequestVote (RequestVoteRequest) returns (RequestVoteResponse) {};
+  rpc systemService  (ClientRequest) returns (ClientResponse) {};
+}

@@ -1,14 +1,19 @@
 package com.github.scaars10.pecanraft.structures;
 
+
 public class LogEntry {
-    int term,key,value;
-    LogEntry(int term, int key, int value){
+
+    long index;
+    int key,value;
+    long term;
+    public LogEntry(long term, int key, int value, long index){
         this.term = term;
         this.key = key;
         this.value = value;
+        this.index  = index;
     }
 
-    public int getTerm() {
+    public long getTerm() {
         return term;
     }
 }
