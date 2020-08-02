@@ -1,4 +1,4 @@
-package com.github.scaars10.pecanraft.Server;
+package com.github.scaars10.pecanraft.server;
 
 import java.util.*;
 

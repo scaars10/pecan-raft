@@ -1,7 +1,12 @@
-package com.github.scaars10.pecanraft.Server;
+package com.github.scaars10.pecanraft.server;
 
 import com.github.scaars10.pecanraft.RpcLogEntry;
 import com.github.scaars10.pecanraft.structures.LogEntry;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import org.bson.Document;
 
 
 import java.util.ArrayList;
@@ -14,6 +19,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * The type Pecan node.
  */
 public class PecanNode {
+
 
     ReentrantReadWriteLock nodeLock = new ReentrantReadWriteLock();
     //interval after which leader sends a heartbeat
@@ -75,6 +81,7 @@ public class PecanNode {
     public PecanNode(int id, int []peerId){
         this.id = id;
         this.peerId = peerId;
+
     }
 
     public LogEntry getLog(long searchIndex)

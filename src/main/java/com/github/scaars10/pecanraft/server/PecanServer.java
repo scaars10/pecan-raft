@@ -1,4 +1,4 @@
-package com.github.scaars10.pecanraft.Server;
+package com.github.scaars10.pecanraft.server;
 
 
 
@@ -19,12 +19,10 @@ import io.grpc.stub.StreamObserver;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 
 public class PecanServer {
     RaftServiceImpl raftService;
