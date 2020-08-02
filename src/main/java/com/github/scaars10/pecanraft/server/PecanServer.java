@@ -1,15 +1,9 @@
 package com.github.scaars10.pecanraft.server;
 
 
-
-import com.github.scaars10.pecanRaft.ClientRequest;
-import com.github.scaars10.pecanRaft.ClientResponse;
+import com.github.scaars10.pecanraft.ClientRequest;
+import com.github.scaars10.pecanraft.ClientResponse;
 import com.github.scaars10.pecanraft.*;
-import com.github.scaars10.pecanraft.AppendEntriesRequest;
-import com.github.scaars10.pecanraft.AppendEntriesResponse;
-import com.github.scaars10.pecanraft.RequestVoteRequest;
-import com.github.scaars10.pecanraft.RequestVoteResponse;
-import com.github.scaars10.pecanraft.RpcLogEntry;
 import com.github.scaars10.pecanraft.structures.LogEntry;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
@@ -21,13 +15,16 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
-import java.util.concurrent.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class PecanServer {
     RaftServiceImpl raftService;
     RaftGrpcServiceClient rpcClient;
     Thread serverThread;
+
 
     PecanNode node;
 
@@ -59,14 +56,14 @@ public class PecanServer {
     }
 
 
-    public PecanServer(int id, int[]peerId){
-
-
+    public PecanServer(int id, int[]peerId)
+    {
         this.node = new PecanNode(id, peerId);
         this.raftService = new RaftServiceImpl(node);
         this.rpcClient = new RaftGrpcServiceClient(node);
+
         startServer();
-        System.out.println("Object for node "+id+" created");
+        node.logMessage("Server for node-"+id+" created");
     }
 
 
@@ -88,7 +85,8 @@ public class PecanServer {
     void startElection()
     {
         //Startup Election
-        System.out.println("Timed out. No heartbeat received from leader with (id-"+node.leaderId+"). Starting a new election");
+        node.logMessage("Timed out. No heartbeat received from leader with " +
+                "(id-"+node.leaderId+"). Starting a new election");
 
         //obtain a writeLock to ensure safety
         node.nodeLock.writeLock().lock();
@@ -102,7 +100,7 @@ public class PecanServer {
             lastLogTerm = node.committedLog.get(node.committedLog.size()-1).getTerm();
         }
         //release the writeLock
-        node.nodeLock.writeLock().lock();
+        node.nodeLock.writeLock().unlock();
 
         final ExecutorService exec = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors()*2);
 
@@ -135,7 +133,7 @@ public class PecanServer {
                 }
                 //catching Exceptions
                 catch (Exception e) {
-                    System.out.println("General Exception for - node-" + node.peerId[finalI]);
+                    node.logMessage("General Exception for - node-" + node.peerId[finalI]);
                     e.printStackTrace();
                 }
             });
@@ -161,7 +159,8 @@ public class PecanServer {
                 }
             }
             //stop waiting if a new leader was elected meanwhile or this candidate has obtained majority of votes
-            if(node.nodeState== PecanNode.possibleStates.FOLLOWER || voteCount.get()>(node.peerId.length-1)/2)
+            if(node.nodeState== PecanNode.possibleStates.FOLLOWER ||
+                    voteCount.get()>(node.peerId.length-1)/2)
             {
                 for (final Future<?> future : futures)
                 {
@@ -251,7 +250,8 @@ public class PecanServer {
         @Override
         public StreamObserver<AppendEntriesRequest> appendEntries
                 (StreamObserver<com.github.scaars10.pecanraft.AppendEntriesResponse> responseObserver) {
-            StreamObserver <AppendEntriesRequest> streamObserver = new StreamObserver<AppendEntriesRequest>() {
+            StreamObserver <AppendEntriesRequest> streamObserver =
+                    new StreamObserver<AppendEntriesRequest>() {
                 @Override
                 public void onNext(AppendEntriesRequest value) {
 
@@ -398,7 +398,12 @@ public class PecanServer {
                     setCandidateId(node.id).setTerm(node.currentTerm).setLastLogIndex(lastLog.getIndex()).
                     setLastLogTerm(lastLog.getTerm()).build();
             return client.requestVote(req);
-
         }
+
+        public AppendEntriesResponse appendEntries(String address, int port)
+        {
+            return null;
+        }
+
     }
 }

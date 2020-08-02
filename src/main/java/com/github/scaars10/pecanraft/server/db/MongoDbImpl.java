@@ -14,22 +14,23 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import static com.mongodb.client.model.Filters.eq;
 
-public class mongoDbImpl implements dbBase
+public class MongoDbImpl implements DbBase
 {
     private ReentrantReadWriteLock dbLock = new ReentrantReadWriteLock();
-    private MongoClient mongoClient ;
-    private MongoDatabase database;
-    private MongoCollection<Document> logCollection, fieldCollection;
-    public mongoDbImpl(long id)
+    private MongoCollection<Document> commLogCollection, uncommLogCollection, fieldCollection;
+
+    public MongoDbImpl(long id)
     {
-        mongoClient = MongoClients.create("mongodb://localhost:27017");
-        database = mongoClient.getDatabase("pecanDb");
-        logCollection = database.getCollection("node_log_"+id);
+        MongoClient mongoClient = MongoClients.create("mongodb://localhost:27017");
+        MongoDatabase database = mongoClient.getDatabase("pecanDb");
+        commLogCollection = database.getCollection("node_committedLog_"+id);
+        uncommLogCollection = database.getCollection("node_uncommittedLog_"+id);
         fieldCollection = database.getCollection("node_field_"+id);
+
     }
 
     @Override
-    public void persistLogToDb(List<LogEntry> logs)
+    public void writeCommittedLogs(List<LogEntry> logs)
     {
         dbLock.writeLock().lock();
         logs.parallelStream().forEach((log)->
@@ -37,10 +38,24 @@ public class mongoDbImpl implements dbBase
             Document doc = new Document("index", new ObjectId(String.valueOf(log.getIndex())))
                     .append("term", log.getTerm())
                     .append("value", log.getValue()).append("key", log.getKey());
-            logCollection.insertOne(doc);
+            commLogCollection.insertOne(doc);
         });
         dbLock.writeLock().unlock();
 
+    }
+
+    @Override
+    public void writeUncommittedLogs(List<LogEntry> logs)
+    {
+        dbLock.writeLock().lock();
+        logs.parallelStream().forEach((log)->
+        {
+            Document doc = new Document("index", new ObjectId(String.valueOf(log.getIndex())))
+                    .append("term", log.getTerm())
+                    .append("value", log.getValue()).append("key", log.getKey());
+            uncommLogCollection.insertOne(doc);
+        });
+        dbLock.writeLock().unlock();
     }
 
     @Override
@@ -49,7 +64,7 @@ public class mongoDbImpl implements dbBase
         dbLock.writeLock().lock();
         Document doc = new Document("id",1).append("term", currentTerm)
                 .append("votedFor", votedFor);
-        Document res = null;
+
         if(fieldCollection.countDocuments()==0)
         {
             fieldCollection.insertOne(doc);
@@ -68,17 +83,31 @@ public class mongoDbImpl implements dbBase
     }
 
     @Override
-    public List<LogEntry> readLogFromDb()
+    public List<LogEntry> readCommLogsFromDb()
     {
         dbLock.readLock().lock();
         List <LogEntry> list = new ArrayList<>();
-        logCollection.find().iterator().forEachRemaining(log-> list.add(documentToLog(log)));
+        if(commLogCollection.countDocuments()==0)
+            return null;
+        commLogCollection.find().iterator().forEachRemaining(log-> list.add(documentToLog(log)));
         dbLock.readLock().unlock();
         return list;
     }
 
     @Override
-    public Pair<Long, Long> getFields()
+    public List<LogEntry> readUnCommLogsFromDb()
+    {
+        dbLock.readLock().lock();
+        List <LogEntry> list = new ArrayList<>();
+        if(uncommLogCollection.countDocuments()==0)
+            return null;
+        uncommLogCollection.find().iterator().forEachRemaining(log-> list.add(documentToLog(log)));
+        dbLock.readLock().unlock();
+        return list;
+    }
+
+    @Override
+    public Pair<Long, Integer> getFields()
     {
         dbLock.readLock().lock();
         if(fieldCollection.countDocuments()==0)
@@ -86,6 +115,6 @@ public class mongoDbImpl implements dbBase
         Document doc = fieldCollection.find().first();
         dbLock.readLock().unlock();
         assert doc != null;
-        return new Pair<>(doc.getLong("term"), doc.getLong("votedFor"));
+        return new Pair<>(doc.getLong("term"), doc.getInteger("votedFor"));
     }
 }

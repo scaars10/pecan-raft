@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-option java_package = "com.github.scaars10.pecanRaft";
+option java_package = "com.github.scaars10.pecanraft";
 option java_multiple_files = true;
 
 message ClientRequest

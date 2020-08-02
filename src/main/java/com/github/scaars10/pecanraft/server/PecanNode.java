@@ -1,18 +1,20 @@
 package com.github.scaars10.pecanraft.server;
 
 import com.github.scaars10.pecanraft.RpcLogEntry;
+import com.github.scaars10.pecanraft.server.db.DbBase;
+import com.github.scaars10.pecanraft.server.db.MongoDbImpl;
 import com.github.scaars10.pecanraft.structures.LogEntry;
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoClients;
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
-import org.bson.Document;
+
+import javafx.util.Pair;
+
 
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 
 /**
@@ -20,7 +22,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  */
 public class PecanNode {
 
-
+    private static final Logger logger = LogManager.getLogger(PecanNode.class);
+    DbBase db;
     ReentrantReadWriteLock nodeLock = new ReentrantReadWriteLock();
     //interval after which leader sends a heartbeat
     int heartbeat = 50;
@@ -78,10 +81,14 @@ public class PecanNode {
         index++;
         uncommittedLog.add(new LogEntry(currentTerm, key, value, index));
     }
-    public PecanNode(int id, int []peerId){
+    public PecanNode(int id, int []peerId)
+    {
         this.id = id;
         this.peerId = peerId;
-
+        loadLogs();
+        loadFields();
+        db = new MongoDbImpl(id);
+        logMessage("Node created");
     }
 
     public LogEntry getLog(long searchIndex)
@@ -102,11 +109,35 @@ public class PecanNode {
 
     }
 
+    public void logMessage(String message)
+    {
+        logger.info("Info for Node-{} :- {}",id, message);
+    }
     public void updateUncommittedLog(List<RpcLogEntry> list, long matchIndex)
     {
 
     }
 
+    public void loadLogs()
+    {
+        committedLog = (ArrayList<LogEntry>) db.readCommLogsFromDb();
+        if(committedLog==null)
+            committedLog = new ArrayList<>();
+
+        uncommittedLog = (ArrayList<LogEntry>) db.readUnCommLogsFromDb();
+        if(uncommittedLog==null)
+            uncommittedLog = new ArrayList<>();
+    }
+
+    public void loadFields()
+    {
+        Pair<Long, Integer> pair = db.getFields();
+        if(pair!=null)
+        {
+            currentTerm = pair.getKey();
+            votedFor.set(pair.getValue());
+        }
+    }
     public LogEntry getLastLog()
     {
         if(uncommittedLog.size()>0)
