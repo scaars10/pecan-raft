@@ -22,6 +22,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class PecanServer {
     RaftServiceImpl raftService;
@@ -250,83 +251,69 @@ public class PecanServer {
                             getTerm() >= lastLogTerm));
         }
 
-        @Override
-        public StreamObserver<AppendEntriesRequest> appendEntries
-            (StreamObserver<com.github.scaars10.pecanraft.AppendEntriesResponse> responseObserver) {
-            StreamObserver <AppendEntriesRequest> streamObserver =
-                    new StreamObserver<AppendEntriesRequest>() {
-                @Override
-                public void onNext(AppendEntriesRequest value) {
 
-                    long term = value.getTerm();
-                    if(node.currentTerm>term)
+        @Override
+        public void appendEntries(AppendEntriesRequest request, StreamObserver<AppendEntriesResponse> responseObserver) {
+
+                long term = request.getTerm();
+                if(node.currentTerm>term)
+                {
+                    AppendEntriesResponse response = AppendEntriesResponse.newBuilder()
+                            .setResponseCode(AppendEntriesResponse.ResponseCodes.OUTDATED).
+                                    setTerm(node.currentTerm).build();
+                    responseObserver.onNext(response);
+                    responseObserver.onCompleted();
+                }
+                else
+                {
+                    restartElectionTimer();
+                    if(request.getLogEntriesCount()==0)
                     {
-                        AppendEntriesResponse response = AppendEntriesResponse.newBuilder()
-                                .setResponseCode(AppendEntriesResponse.ResponseCodes.OUTDATED).
-                                setTerm(node.currentTerm).build();
-                        responseObserver.onNext(response);
                         responseObserver.onCompleted();
                     }
                     else
                     {
-                        restartElectionTimer();
-                        if(value.getLogEntriesCount()==0)
+                        long matchIndex = node.commitIndex;
+                        LogEntry searchLog;
+                        for (RpcLogEntry log : request.getLogEntriesList())
                         {
+                            long logIndex = log.getIndex(), logTerm = log.getTerm();
+                            searchLog = node.getLog(logIndex);
+                            if (searchLog == null || searchLog.getTerm() != logTerm)
+                            {
+
+                                break;
+
+                            } else if (searchLog.getTerm() == logTerm) {
+                                matchIndex = logIndex;
+                            }
+
+                        }
+                        if(matchIndex>node.commitIndex)
+                        {
+                            AppendEntriesResponse response = AppendEntriesResponse.newBuilder().
+                                    setResponseCode(AppendEntriesResponse.ResponseCodes.SUCCESS).
+                                    setMatchIndex(matchIndex).build();
+                            responseObserver.onNext(response);
                             responseObserver.onCompleted();
+                            node.updateUncommittedLog(request.getLogEntriesList(), matchIndex);
+                            node.persistToDb(request.getCommitIndex());
+                            node.commitIndex = request.getCommitIndex();
                         }
                         else
                         {
-                            long matchIndex = node.commitIndex;
-                            LogEntry searchLog;
-                            for (RpcLogEntry log : value.getLogEntriesList())
-                            {
-                                long logIndex = log.getIndex(), logTerm = log.getTerm();
-                                searchLog = node.getLog(logIndex);
-                                if (searchLog == null || searchLog.getTerm() != logTerm)
-                                {
-
-                                    break;
-
-                                } else if (searchLog.getTerm() == logTerm) {
-                                    matchIndex = logIndex;
-                                }
-
-                            }
-                            if(matchIndex>node.commitIndex)
-                            {
-                                AppendEntriesResponse response = AppendEntriesResponse.newBuilder().
-                                        setResponseCode(AppendEntriesResponse.ResponseCodes.SUCCESS).
-                                        setMatchIndex(matchIndex).build();
-                                responseObserver.onNext(response);
-                                responseObserver.onCompleted();
-                                node.updateUncommittedLog(value.getLogEntriesList(), matchIndex);
-                                node.persistToDb(value.getCommitIndex());
-                                node.commitIndex = value.getCommitIndex();
-                            }
-                            else
-                            {
-                                AppendEntriesResponse response = AppendEntriesResponse.newBuilder().
-                                        setResponseCode(AppendEntriesResponse.ResponseCodes.MORE).
-                                        setMatchIndex(matchIndex).build();
-                                responseObserver.onNext(response);
-                            }
+                            AppendEntriesResponse response = AppendEntriesResponse.newBuilder().
+                                    setResponseCode(AppendEntriesResponse.ResponseCodes.MORE).
+                                    setMatchIndex(matchIndex).build();
+                            responseObserver.onNext(response);
+                            responseObserver.onCompleted();
                         }
                     }
                 }
 
-                @Override
-                public void onError(Throwable t) {
 
-                }
-
-                @Override
-                public void onCompleted()
-                {
-
-                }
             };
-            return streamObserver;
-        }
+
 
         @Override
         public void requestVote(com.github.scaars10.pecanraft.RequestVoteRequest request,
@@ -411,17 +398,18 @@ public class PecanServer {
                     .build();
 
             RaftNodeRpcGrpc.RaftNodeRpcStub client = RaftNodeRpcGrpc.newStub(channel);
-
-            final StreamObserver<AppendEntriesRequest> streamObserver =
+            AtomicReference<StreamObserver<AppendEntriesRequest>> requestObserverRef =
+                    new AtomicReference<>();
+            StreamObserver<AppendEntriesRequest> streamObserver =
             client.appendEntries(new StreamObserver<AppendEntriesResponse>() {
                 @Override
                 public void onNext(AppendEntriesResponse value)
                 {
-                    if(value.getResponseCode()== AppendEntriesResponse.ResponseCodes.OUTDATED)
+                    if(value.getResponseCode() == AppendEntriesResponse.ResponseCodes.OUTDATED)
                     {
                         updateStatus(value.getTerm(),-1,-1);
                     }
-                    if(value.getResponseCode()== AppendEntriesResponse.ResponseCodes.MORE)
+                    if(value.getResponseCode() == AppendEntriesResponse.ResponseCodes.MORE)
                     {
                         long index = value.getMatchIndex();
                         List<LogEntry> logs = node.getLogs(index, -1);
@@ -440,7 +428,7 @@ public class PecanServer {
                                 .setPrevLogIndex(lastLog.getIndex())
                                 .setLeaderId(node.id).setCommitIndex(node.commitIndex)
                                 .build();
-
+                        requestObserverRef.get().onNext(req);
                     }
                 }
 
@@ -456,7 +444,7 @@ public class PecanServer {
                     latch.countDown();
                 }
             });
-
+            requestObserverRef.set(streamObserver);
 
         }
 
