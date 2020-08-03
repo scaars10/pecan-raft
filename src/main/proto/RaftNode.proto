@@ -48,7 +48,7 @@ message RequestVoteResponse
 
 
 service RaftNodeRpc{
-  rpc AppendEntries (stream AppendEntriesRequest) returns (stream AppendEntriesResponse) {};
-  rpc RequestVote (RequestVoteRequest) returns (RequestVoteResponse) {};
+  rpc appendEntries (stream AppendEntriesRequest) returns (stream AppendEntriesResponse) {};
+  rpc requestVote (RequestVoteRequest) returns (RequestVoteResponse) {};
   rpc systemService  (ClientRequest) returns (ClientResponse) {};
 }

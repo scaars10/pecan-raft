@@ -5,16 +5,19 @@ import com.github.scaars10.pecanraft.ClientRequest;
 import com.github.scaars10.pecanraft.ClientResponse;
 import com.github.scaars10.pecanraft.*;
 import com.github.scaars10.pecanraft.structures.LogEntry;
+import com.google.protobuf.Message;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import io.grpc.stub.StreamObserver;
 
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -249,7 +252,7 @@ public class PecanServer {
 
         @Override
         public StreamObserver<AppendEntriesRequest> appendEntries
-                (StreamObserver<com.github.scaars10.pecanraft.AppendEntriesResponse> responseObserver) {
+            (StreamObserver<com.github.scaars10.pecanraft.AppendEntriesResponse> responseObserver) {
             StreamObserver <AppendEntriesRequest> streamObserver =
                     new StreamObserver<AppendEntriesRequest>() {
                 @Override
@@ -400,9 +403,61 @@ public class PecanServer {
             return client.requestVote(req);
         }
 
-        public AppendEntriesResponse appendEntries(String address, int port)
+        public void appendEntries(String address, int port)
         {
-            return null;
+            CountDownLatch latch = new CountDownLatch(1);
+            ManagedChannel channel = ManagedChannelBuilder.forAddress(address, port)
+                    .usePlaintext()
+                    .build();
+
+            RaftNodeRpcGrpc.RaftNodeRpcStub client = RaftNodeRpcGrpc.newStub(channel);
+
+            final StreamObserver<AppendEntriesRequest> streamObserver =
+            client.appendEntries(new StreamObserver<AppendEntriesResponse>() {
+                @Override
+                public void onNext(AppendEntriesResponse value)
+                {
+                    if(value.getResponseCode()== AppendEntriesResponse.ResponseCodes.OUTDATED)
+                    {
+                        updateStatus(value.getTerm(),-1,-1);
+                    }
+                    if(value.getResponseCode()== AppendEntriesResponse.ResponseCodes.MORE)
+                    {
+                        long index = value.getMatchIndex();
+                        List<LogEntry> logs = node.getLogs(index, -1);
+                        List <RpcLogEntry> rpcLogs = new ArrayList<>();
+                        logs.forEach(log->{
+                            rpcLogs.add(RpcLogEntry.newBuilder()
+                                    .setIndex(log.getIndex()).setTerm(log.getTerm())
+                                    .setKey(log.getKey()).setValue(log.getValue())
+                                    .build());
+                        });
+
+                        LogEntry lastLog = node.getLastLog();
+
+                        AppendEntriesRequest req = AppendEntriesRequest.newBuilder()
+                                .addAllLogEntries(rpcLogs).setPrevLogTerm(lastLog.getTerm())
+                                .setPrevLogIndex(lastLog.getIndex())
+                                .setLeaderId(node.id).setCommitIndex(node.commitIndex)
+                                .build();
+
+                    }
+                }
+
+                @Override
+                public void onError(Throwable t)
+                {
+                    latch.countDown();
+                }
+
+                @Override
+                public void onCompleted()
+                {
+                    latch.countDown();
+                }
+            });
+
+
         }
 
     }
