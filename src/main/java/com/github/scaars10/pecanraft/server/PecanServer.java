@@ -13,9 +13,7 @@ import io.grpc.stub.StreamObserver;
 
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Random;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -69,12 +67,54 @@ public class PecanServer {
 
     final ExecutorService electionExecutor = Executors.newFixedThreadPool(1);
     Future<?> electionFuture;
+    Timer leaderTimer;
+
+    final ScheduledExecutorService leaderExecutor = Executors.newScheduledThreadPool
+            (2);
+    Future<?> leaderFuture;
 
     /**
      * Class for a thread to run in parallel when timer on the node times out and election starts.
      */
+
+
     void startLeader()
     {
+        while(node.nodeState == PecanNode.possibleStates.LEADER)
+        {
+            try {
+                Thread.sleep(node.heartbeat);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            allAppendEntries();
+
+        }
+    }
+
+    void stopLeader()
+    {
+
+        leaderFuture.cancel(true);
+    }
+
+    void allAppendEntries()
+    {
+
+        new Thread(()->
+        {
+            List<Integer> peerList = new ArrayList<>();
+
+            for (int i = 0; i < node.peerId.length; i++) {
+                if (i != node.id)
+                    peerList.add(i);
+            }
+            peerList.stream().parallel().forEach((peerId) ->
+            {
+                rpcClient.appendEntries("localhost", peerId);
+            });
+        }).start();
+
 
     }
     void startFollower()
@@ -393,9 +433,10 @@ public class PecanServer {
             this.node = node;
         }
 
-        public RequestVoteResponse requestVote(String address, int port)
+        public RequestVoteResponse requestVote(String address, int nodeId)
         {
-            ManagedChannel channel = ManagedChannelBuilder.forAddress(address, port)
+            ManagedChannel channel = ManagedChannelBuilder
+                    .forAddress(address, PecanConfig.getPort(nodeId))
                     .usePlaintext()
                     .build();
 
@@ -407,10 +448,11 @@ public class PecanServer {
             return client.requestVote(req);
         }
 
-        public void appendEntries(String address, int port, int nodeId)
+        public void appendEntries(String address, int nodeId)
         {
             CountDownLatch latch = new CountDownLatch(1);
-            ManagedChannel channel = ManagedChannelBuilder.forAddress(address, port)
+            ManagedChannel channel = ManagedChannelBuilder
+                    .forAddress(address, PecanConfig.getPort(nodeId))
                     .usePlaintext()
                     .build();
 
