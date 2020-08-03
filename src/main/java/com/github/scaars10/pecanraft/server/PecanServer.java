@@ -253,67 +253,83 @@ public class PecanServer {
 
 
         @Override
-        public void appendEntries(AppendEntriesRequest request, StreamObserver<AppendEntriesResponse> responseObserver) {
+        public StreamObserver<AppendEntriesRequest> appendEntries
+                (StreamObserver<AppendEntriesResponse> responseObserver)
+        {
+            StreamObserver <AppendEntriesRequest> streamObserver =
+                new StreamObserver<AppendEntriesRequest>() {
+                @Override
+                public void onNext(AppendEntriesRequest value) {
 
-                long term = request.getTerm();
-                if(node.currentTerm>term)
-                {
-                    AppendEntriesResponse response = AppendEntriesResponse.newBuilder()
-                            .setResponseCode(AppendEntriesResponse.ResponseCodes.OUTDATED).
-                                    setTerm(node.currentTerm).build();
-                    responseObserver.onNext(response);
-                    responseObserver.onCompleted();
-                }
-                else
-                {
-                    restartElectionTimer();
-                    if(request.getLogEntriesCount()==0)
+                    long term = value.getTerm();
+                    if(node.currentTerm>term)
                     {
+                        AppendEntriesResponse response = AppendEntriesResponse.newBuilder()
+                                .setResponseCode(AppendEntriesResponse.ResponseCodes.OUTDATED).
+                                        setTerm(node.currentTerm).build();
+                        responseObserver.onNext(response);
                         responseObserver.onCompleted();
                     }
                     else
                     {
-                        long matchIndex = node.commitIndex;
-                        LogEntry searchLog;
-                        for (RpcLogEntry log : request.getLogEntriesList())
+                        restartElectionTimer();
+                        if(value.getLogEntriesCount()==0)
                         {
-                            long logIndex = log.getIndex(), logTerm = log.getTerm();
-                            searchLog = node.getLog(logIndex);
-                            if (searchLog == null || searchLog.getTerm() != logTerm)
-                            {
-
-                                break;
-
-                            } else if (searchLog.getTerm() == logTerm) {
-                                matchIndex = logIndex;
-                            }
-
-                        }
-                        if(matchIndex>node.commitIndex)
-                        {
-                            AppendEntriesResponse response = AppendEntriesResponse.newBuilder().
-                                    setResponseCode(AppendEntriesResponse.ResponseCodes.SUCCESS).
-                                    setMatchIndex(matchIndex).build();
-                            responseObserver.onNext(response);
                             responseObserver.onCompleted();
-                            node.updateUncommittedLog(request.getLogEntriesList(), matchIndex);
-                            node.persistToDb(request.getCommitIndex());
-                            node.commitIndex = request.getCommitIndex();
                         }
                         else
                         {
-                            AppendEntriesResponse response = AppendEntriesResponse.newBuilder().
-                                    setResponseCode(AppendEntriesResponse.ResponseCodes.MORE).
-                                    setMatchIndex(matchIndex).build();
-                            responseObserver.onNext(response);
-                            responseObserver.onCompleted();
+                            long matchIndex = node.commitIndex;
+                            LogEntry searchLog;
+                            for (RpcLogEntry log : value.getLogEntriesList())
+                            {
+                                long logIndex = log.getIndex(), logTerm = log.getTerm();
+                                searchLog = node.getLog(logIndex);
+                                if (searchLog == null || searchLog.getTerm() != logTerm)
+                                {
+
+                                    break;
+
+                                } else if (searchLog.getTerm() == logTerm) {
+                                    matchIndex = logIndex;
+                                }
+
+                            }
+                            if(matchIndex>node.commitIndex)
+                            {
+                                AppendEntriesResponse response = AppendEntriesResponse.newBuilder().
+                                        setResponseCode(AppendEntriesResponse.ResponseCodes.SUCCESS).
+                                        setMatchIndex(matchIndex).build();
+                                responseObserver.onNext(response);
+                                responseObserver.onCompleted();
+                                node.updateUncommittedLog(value.getLogEntriesList(), matchIndex);
+                                node.persistToDb(value.getCommitIndex());
+                                node.commitIndex = value.getCommitIndex();
+                            }
+                            else
+                            {
+                                AppendEntriesResponse response = AppendEntriesResponse.newBuilder().
+                                        setResponseCode(AppendEntriesResponse.ResponseCodes.MORE).
+                                        setMatchIndex(matchIndex).build();
+                                responseObserver.onNext(response);
+                            }
                         }
                     }
                 }
 
+                @Override
+                public void onError(Throwable t) {
 
+                }
+
+                @Override
+                public void onCompleted()
+                {
+
+                }
             };
-
+            return streamObserver;
+        }
 
         @Override
         public void requestVote(com.github.scaars10.pecanraft.RequestVoteRequest request,
@@ -412,7 +428,7 @@ public class PecanServer {
                     if(value.getResponseCode() == AppendEntriesResponse.ResponseCodes.MORE)
                     {
                         long index = value.getMatchIndex();
-                        List<LogEntry> logs = node.getLogs(index, -1);
+                        List<LogEntry> logs = node.getLogs((int) index, -1);
                         List <RpcLogEntry> rpcLogs = new ArrayList<>();
                         logs.forEach(log->{
                             rpcLogs.add(RpcLogEntry.newBuilder()

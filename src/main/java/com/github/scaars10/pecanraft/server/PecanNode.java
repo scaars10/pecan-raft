@@ -149,6 +149,26 @@ public class PecanNode {
             return committedLog.get(committedLog.size()-1);
         }
     }
+
+    public List<LogEntry> getLogs(int start, int end)
+    {
+        if(end == -1)
+        {
+            end = committedLog.size() + uncommittedLog.size()-1;
+        }
+        List <LogEntry> result = new ArrayList<>(end-start+1);
+        while(start<committedLog.size())
+        {
+            result.add(committedLog.get(start));
+            start++;
+        }
+        while(start<=end)
+        {
+            result.add(uncommittedLog.get(start-committedLog.size()));
+            start++;
+        }
+        return result;
+    }
     public LogEntry getLastCommittedLog()
     {
         return committedLog.get(committedLog.size()-1);
