@@ -5,7 +5,6 @@ import com.github.scaars10.pecanraft.ClientRequest;
 import com.github.scaars10.pecanraft.ClientResponse;
 import com.github.scaars10.pecanraft.*;
 import com.github.scaars10.pecanraft.structures.LogEntry;
-import com.google.protobuf.Message;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.Server;
@@ -17,10 +16,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -187,7 +183,12 @@ public class PecanServer {
 
     }
 
-
+    long max_of(long a, long b)
+    {
+        if(a>b)
+            return a;
+        return b;
+    }
     void  startElectionTimer()
     {
         Random rand= new Random();
@@ -406,7 +407,7 @@ public class PecanServer {
             return client.requestVote(req);
         }
 
-        public void appendEntries(String address, int port)
+        public void appendEntries(String address, int port, int nodeId)
         {
             CountDownLatch latch = new CountDownLatch(1);
             ManagedChannel channel = ManagedChannelBuilder.forAddress(address, port)
@@ -446,6 +447,7 @@ public class PecanServer {
                                 .build();
                         requestObserverRef.get().onNext(req);
                     }
+
                 }
 
                 @Override
@@ -461,6 +463,27 @@ public class PecanServer {
                 }
             });
             requestObserverRef.set(streamObserver);
+            LogEntry lastLog = node.getLastLog();
+            List<LogEntry> logs = node.getLogs((int)
+                    node.nextIndex[(int) max_of(nodeId, node.commitIndex)], -1);
+            List <RpcLogEntry> rpcLogs = new ArrayList<>();
+            logs.forEach(log->{
+                rpcLogs.add(RpcLogEntry.newBuilder()
+                        .setIndex(log.getIndex()).setTerm(log.getTerm())
+                        .setKey(log.getKey()).setValue(log.getValue())
+                        .build());
+            });
+            requestObserverRef.get().onNext(AppendEntriesRequest
+                    .newBuilder().setLeaderId(node.id).setCommitIndex(node.commitIndex)
+                    .setPrevLogIndex(lastLog.getIndex()).
+                            setPrevLogTerm(lastLog.getTerm())
+                    .addAllLogEntries(rpcLogs)
+                    .build());
+            try {
+                latch.await(20, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                node.logError(e.getMessage());
+            }
 
         }
 

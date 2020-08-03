@@ -10,6 +10,7 @@ import javafx.util.Pair;
 
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -25,6 +26,7 @@ public class PecanNode {
     private static final Logger logger = LogManager.getLogger(PecanNode.class);
     DbBase db;
     ReentrantReadWriteLock nodeLock = new ReentrantReadWriteLock();
+    ReentrantReadWriteLock logLock = new ReentrantReadWriteLock();
     //interval after which leader sends a heartbeat
     int heartbeat = 50;
 
@@ -34,17 +36,11 @@ public class PecanNode {
      * All possible States
      */
     public enum possibleStates  {
-        /**
-         * Follower possible states.
-         */
+
         FOLLOWER,
-        /**
-         * Candidate possible states.
-         */
+
         CANDIDATE,
-        /**
-         * Leader possible states.
-         */
+
         LEADER
     }
 
@@ -63,12 +59,13 @@ public class PecanNode {
     long currentTerm = 0;
     ArrayList<LogEntry> committedLog = new ArrayList<LogEntry>();
     ArrayList<LogEntry> uncommittedLog = new ArrayList<LogEntry>();
-    long commitIndex = -1, index = -1;
-    int lastApplied = -1;
+    long commitIndex = -1;
+    int lastApplied = -1; //index of the highest log entry applied to State Machine
     /**
-     * Stores the ids of peers
+     * peerId Stores the ids of peers and nextIndex stores the index of the next entry to be sent
+     * to those nodes as a leader
      */
-    int []peerId;
+    int []peerId, nextIndex;
 
     /**
      * Initial Node state. All nodes are followers in the beginning.
@@ -78,17 +75,27 @@ public class PecanNode {
     //Method to add new entries to uncommitted log
     public void addToUncommittedLog(int key, int value)
     {
-        index++;
-        uncommittedLog.add(new LogEntry(currentTerm, key, value, index));
+        LogEntry lastLog = getLastLog();
+        long lastIndex;
+        if(lastLog == null)
+            lastIndex = -1;
+        else
+            lastIndex = lastLog.getIndex();
+        uncommittedLog.add(new LogEntry(currentTerm, key, value, lastIndex+1));
+
     }
     public PecanNode(int id, int []peerId)
     {
+
         this.id = id;
         this.peerId = peerId;
+        nextIndex = new int[peerId.length];
+        Arrays.fill(nextIndex, -1);
         loadLogs();
         loadFields();
         db = new MongoDbImpl(id);
         logMessage("Node created");
+
     }
 
     public LogEntry getLog(long searchIndex)
@@ -113,6 +120,12 @@ public class PecanNode {
     {
         logger.info("Info for Node-{} :- {}",id, message);
     }
+
+    public void logError(String message)
+    {
+        logger.error("Error for Node-{} :- {}",id, message);
+    }
+
     public void updateUncommittedLog(List<RpcLogEntry> list, long matchIndex)
     {
 
@@ -152,6 +165,7 @@ public class PecanNode {
 
     public List<LogEntry> getLogs(int start, int end)
     {
+
         if(end == -1)
         {
             end = committedLog.size() + uncommittedLog.size()-1;
