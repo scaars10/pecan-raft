@@ -12,6 +12,7 @@ import javafx.util.Pair;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import org.apache.logging.log4j.LogManager;
@@ -32,6 +33,31 @@ public class PecanNode {
 
     //interval after which follower is allowed to become a candidate if a heartbeat is not received from leader
     int leaderTimeout = 1000;
+
+    public AtomicInteger getVotedFor() {
+        return votedFor;
+    }
+
+    public void setVotedFor(AtomicInteger votedFor) {
+        this.votedFor = votedFor;
+    }
+
+    public long getCurrentTerm() {
+        return currentTerm;
+    }
+
+    public void setCurrentTerm(long currentTerm) {
+        this.currentTerm = currentTerm;
+    }
+
+    public long getCommitIndex() {
+        return commitIndex;
+    }
+
+    public void setCommitIndex(long commitIndex) {
+        this.commitIndex = commitIndex;
+    }
+
     /**
      * All possible States
      */
@@ -56,10 +82,10 @@ public class PecanNode {
     /**
      * Current term according to this node
      */
-    long currentTerm = 0;
-    ArrayList<LogEntry> committedLog = new ArrayList<LogEntry>();
-    ArrayList<LogEntry> uncommittedLog = new ArrayList<LogEntry>();
-    long commitIndex = -1;
+    private long currentTerm = 0;
+    private ArrayList<LogEntry> committedLog = new ArrayList<LogEntry>();
+    private ArrayList<LogEntry> uncommittedLog = new ArrayList<LogEntry>();
+    private long commitIndex = -1;
     int lastApplied = -1; //index of the highest log entry applied to State Machine
     /**
      * peerId Stores the ids of peers and nextIndex stores the index of the next entry to be sent
@@ -126,7 +152,7 @@ public class PecanNode {
         logger.error("Error for Node-{} :- {}",id, message);
     }
 
-    public void updateUncommittedLog(List<RpcLogEntry> list, long matchIndex)
+    public void updateUncommittedLog(List<RpcLogEntry> list, long nodeMatchIndex, long leaderMatchIndex)
     {
 
     }
@@ -144,11 +170,14 @@ public class PecanNode {
 
     public void loadFields()
     {
-        Pair<Long, Integer> pair = db.getFields();
-        if(pair!=null)
+        Map<String, Long> map = db.getFields();
+        if(map!=null)
         {
-            currentTerm = pair.getKey();
-            votedFor.set(pair.getValue());
+            currentTerm = map.get("term");
+            //workaround to convert Long to int
+            long temp = map.get("votedFor");
+            votedFor.set((int) temp);
+            commitIndex = map.get("commitIndex");
         }
     }
     public LogEntry getLastLog()

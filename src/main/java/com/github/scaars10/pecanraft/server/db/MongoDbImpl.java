@@ -59,11 +59,11 @@ public class MongoDbImpl implements DbBase
     }
 
     @Override
-    public void persistFieldToDb(long currentTerm, int votedFor)
+    public void persistFieldToDb(long currentTerm, int votedFor, long commitIndex)
     {
         dbLock.writeLock().lock();
         Document doc = new Document("id",1).append("term", currentTerm)
-                .append("votedFor", votedFor);
+                .append("votedFor", votedFor).append("commitIndex", commitIndex);
 
         if(fieldCollection.countDocuments()==0)
         {
@@ -107,7 +107,7 @@ public class MongoDbImpl implements DbBase
     }
 
     @Override
-    public Pair<Long, Integer> getFields()
+    public Map<String, Long> getFields()
     {
         dbLock.readLock().lock();
         if(fieldCollection.countDocuments()==0)
@@ -115,6 +115,10 @@ public class MongoDbImpl implements DbBase
         Document doc = fieldCollection.find().first();
         dbLock.readLock().unlock();
         assert doc != null;
-        return new Pair<>(doc.getLong("term"), doc.getInteger("votedFor"));
+        Map<String, Long> map = new HashMap<>();
+        map.put("votedFor", (long) doc.get("votedFor"));
+        map.put("term", (long) doc.get("term"));
+        map.put("commitIndex", (long) doc.get("commitIndex"));
+        return map;
     }
 }

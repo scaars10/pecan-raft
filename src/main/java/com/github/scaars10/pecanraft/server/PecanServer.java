@@ -67,7 +67,6 @@ public class PecanServer {
 
     final ExecutorService electionExecutor = Executors.newFixedThreadPool(1);
     Future<?> electionFuture;
-    Timer leaderTimer;
 
     final ScheduledExecutorService leaderExecutor = Executors.newScheduledThreadPool
             (2);
@@ -133,12 +132,8 @@ public class PecanServer {
         //change the state to candidate
         node.nodeState = PecanNode.possibleStates.CANDIDATE;
         node.votedFor.set(node.id);
-        node.currentTerm++;
+        node.setCurrentTerm(node.getCurrentTerm()+1);
         AtomicInteger voteCount = new AtomicInteger(1);
-        long lastLogTerm = 0;
-        if(node.committedLog.size()>0){
-            lastLogTerm = node.committedLog.get(node.committedLog.size()-1).getTerm();
-        }
         //release the writeLock
         node.nodeLock.writeLock().unlock();
 
@@ -160,9 +155,6 @@ public class PecanServer {
 
                     RequestVoteResponse res = rpcClient.requestVote("localhost", node.peerId[finalI]);
                     //Request vote from peer [i]
-//                    RmiInterface peer = (RmiInterface) Naming.lookup("Node-" + node.peerId[finalI]);
-//
-//                    int response = peer.RequestVote(node.currentTerm, node.id, node.commitIndex, finalLastLogTerm);
                     if (res.getVoteGranted()) {
                         voteCount.incrementAndGet();
                     }
@@ -268,7 +260,7 @@ public class PecanServer {
 
     public void updateStatus(long term, int leaderId, int votedFor)
     {
-        node.currentTerm = term;
+        node.setCurrentTerm(term);
         node.nodeState = PecanNode.possibleStates.FOLLOWER;
         node.leaderId = leaderId;
         if(votedFor>=0)
@@ -287,8 +279,8 @@ public class PecanServer {
         //returns true if the server making the request is behind
         boolean checkIfServerIsBehind(long term, long lastIndex, long lastLogTerm)
         {
-            return node.currentTerm > term || ((node.commitIndex > lastIndex) &&
-                    (node.committedLog.get(node.committedLog.size()-1).
+            return node.getCurrentTerm() > term || ((node.getCommitIndex() > lastIndex) &&
+                    (node.getLastCommittedLog().
                             getTerm() >= lastLogTerm));
         }
 
@@ -300,61 +292,72 @@ public class PecanServer {
             StreamObserver <AppendEntriesRequest> streamObserver =
                 new StreamObserver<AppendEntriesRequest>() {
                 @Override
-                public void onNext(AppendEntriesRequest value) {
-
-                    long term = value.getTerm();
-                    if(node.currentTerm>term)
+                public void onNext(AppendEntriesRequest value)
+                {
+                    try
                     {
-                        AppendEntriesResponse response = AppendEntriesResponse.newBuilder()
-                                .setResponseCode(AppendEntriesResponse.ResponseCodes.OUTDATED).
-                                        setTerm(node.currentTerm).build();
-                        responseObserver.onNext(response);
-                        responseObserver.onCompleted();
-                    }
-                    else
-                    {
-                        restartElectionTimer();
-                        if(value.getLogEntriesCount()==0)
+                        node.logLock.writeLock().lock();
+                        node.nodeLock.writeLock().lock();
+                        long term = value.getTerm();
+                        if(node.getCurrentTerm()>term)
                         {
+                            AppendEntriesResponse response = AppendEntriesResponse.newBuilder()
+                                .setResponseCode(AppendEntriesResponse.ResponseCodes.OUTDATED)
+                                .setTerm(node.getCurrentTerm()).build();
+                            responseObserver.onNext(response);
                             responseObserver.onCompleted();
                         }
-                        else
-                        {
-                            long matchIndex = node.commitIndex;
-                            LogEntry searchLog;
-                            for (RpcLogEntry log : value.getLogEntriesList())
-                            {
-                                long logIndex = log.getIndex(), logTerm = log.getTerm();
-                                searchLog = node.getLog(logIndex);
-                                if (searchLog == null || searchLog.getTerm() != logTerm)
-                                {
-
-                                    break;
-
-                                } else if (searchLog.getTerm() == logTerm) {
-                                    matchIndex = logIndex;
-                                }
-
-                            }
-                            if(matchIndex>node.commitIndex)
-                            {
-                                AppendEntriesResponse response = AppendEntriesResponse.newBuilder().
-                                        setResponseCode(AppendEntriesResponse.ResponseCodes.SUCCESS).
-                                        setMatchIndex(matchIndex).build();
-                                responseObserver.onNext(response);
+                        else {
+                            restartElectionTimer();
+                            if (value.getLogEntriesCount() == 0) {
                                 responseObserver.onCompleted();
-                                node.updateUncommittedLog(value.getLogEntriesList(), matchIndex);
-                                node.persistToDb(value.getCommitIndex());
-                                node.commitIndex = value.getCommitIndex();
-                            }
-                            else
-                            {
-                                AppendEntriesResponse response = AppendEntriesResponse.newBuilder().
-                                        setResponseCode(AppendEntriesResponse.ResponseCodes.MORE).
-                                        setMatchIndex(matchIndex).build();
-                                responseObserver.onNext(response);
+                            } else {
+                                long nodeMatchIndex = node.getCommitIndex()
+                                        , leaderMatchIndex = node.getCommitIndex();
+                                LogEntry searchLog;
+                                for (RpcLogEntry log : value.getLogEntriesList())
+                                {
+                                    long logIndex = log.getIndex(), logTerm = log.getTerm();
+                                    searchLog = node.getLog(logIndex);
+                                    if (searchLog == null || searchLog.getTerm() != logTerm) {
+
+                                        break;
+
+                                    } else if (searchLog.getTerm() == logTerm) {
+                                        leaderMatchIndex = logIndex;
+                                        nodeMatchIndex = searchLog.getIndex();
+                                    }
+
+                                }
+                                if (nodeMatchIndex > node.getCommitIndex()) {
+                                    AppendEntriesResponse response = AppendEntriesResponse.newBuilder().
+                                        setResponseCode(AppendEntriesResponse.ResponseCodes.SUCCESS).
+                                        setMatchIndex(nodeMatchIndex).build();
+                                    responseObserver.onNext(response);
+                                    responseObserver.onCompleted();
+                                    node.updateUncommittedLog(value.getLogEntriesList(), nodeMatchIndex, leaderMatchIndex);
+                                    node.persistToDb(value.getCommitIndex());
+                                    node.setCommitIndex(value.getCommitIndex());
+                                } else {
+                                    AppendEntriesResponse response = AppendEntriesResponse.newBuilder().
+                                            setResponseCode(AppendEntriesResponse.ResponseCodes.MORE).
+                                            setMatchIndex(nodeMatchIndex).build();
+                                    responseObserver.onNext(response);
+                                }
                             }
                         }
+                    }
+                    catch (Exception e)
+                    {
+                        node.logError(e.getMessage());
+                    }
+                    finally
+                    {
+                        if(node.logLock.writeLock().isHeldByCurrentThread())
+                            node.logLock.writeLock().unlock();
+
+                        if(node.nodeLock.writeLock().isHeldByCurrentThread())
+                            node.nodeLock.writeLock().unlock();
                     }
                 }
 
@@ -381,7 +384,7 @@ public class PecanServer {
             int candidateId = request.getCandidateId();
             com.github.scaars10.pecanraft.RequestVoteResponse response;
 
-            if(node.currentTerm<request.getTerm())
+            if(node.getCurrentTerm()<request.getTerm())
             {
                 updateStatus(request.getTerm(), node.leaderId, -1);
             }
@@ -395,7 +398,7 @@ public class PecanServer {
             }
             else
             {
-                response = RequestVoteResponse.newBuilder().setTerm(node.currentTerm).
+                response = RequestVoteResponse.newBuilder().setTerm(node.getCurrentTerm()).
                         setVoteGranted(false).build();
                 return;
             }
@@ -443,7 +446,7 @@ public class PecanServer {
             RaftNodeRpcGrpc.RaftNodeRpcBlockingStub client = RaftNodeRpcGrpc.newBlockingStub(channel);
             LogEntry lastLog = node.getLastCommittedLog();
             RequestVoteRequest req = RequestVoteRequest.newBuilder().
-                    setCandidateId(node.id).setTerm(node.currentTerm).setLastLogIndex(lastLog.getIndex()).
+                    setCandidateId(node.id).setTerm(node.getCurrentTerm()).setLastLogIndex(lastLog.getIndex()).
                     setLastLogTerm(lastLog.getTerm()).build();
             return client.requestVote(req);
         }
@@ -485,7 +488,7 @@ public class PecanServer {
                         AppendEntriesRequest req = AppendEntriesRequest.newBuilder()
                                 .addAllLogEntries(rpcLogs).setPrevLogTerm(lastLog.getTerm())
                                 .setPrevLogIndex(lastLog.getIndex())
-                                .setLeaderId(node.id).setCommitIndex(node.commitIndex)
+                                .setLeaderId(node.id).setCommitIndex(node.getCommitIndex())
                                 .build();
                         requestObserverRef.get().onNext(req);
                     }
@@ -507,7 +510,7 @@ public class PecanServer {
             requestObserverRef.set(streamObserver);
             LogEntry lastLog = node.getLastLog();
             List<LogEntry> logs = node.getLogs((int)
-                    node.nextIndex[(int) max_of(nodeId, node.commitIndex)], -1);
+                    node.nextIndex[(int) max_of(nodeId, node.getCommitIndex())], -1);
             List <RpcLogEntry> rpcLogs = new ArrayList<>();
             logs.forEach(log->{
                 rpcLogs.add(RpcLogEntry.newBuilder()
@@ -516,13 +519,13 @@ public class PecanServer {
                         .build());
             });
             requestObserverRef.get().onNext(AppendEntriesRequest
-                    .newBuilder().setLeaderId(node.id).setCommitIndex(node.commitIndex)
+                    .newBuilder().setLeaderId(node.id).setCommitIndex(node.getCommitIndex())
                     .setPrevLogIndex(lastLog.getIndex()).
                             setPrevLogTerm(lastLog.getTerm())
                     .addAllLogEntries(rpcLogs)
                     .build());
             try {
-                latch.await(20, TimeUnit.SECONDS);
+                latch.await(2, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
                 node.logError(e.getMessage());
             }
