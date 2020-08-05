@@ -34,12 +34,14 @@ public class PecanNode {
     //interval after which follower is allowed to become a candidate if a heartbeat is not received from leader
     int leaderTimeout = 1000;
 
-    public AtomicInteger getVotedFor() {
-        return votedFor;
+    public int getVotedFor() {
+        return votedFor.get();
     }
 
-    public void setVotedFor(AtomicInteger votedFor) {
-        this.votedFor = votedFor;
+    public void setVotedFor(int newVotedFor) {
+
+        this.votedFor.set(newVotedFor);
+        db.updateFields(currentTerm, newVotedFor, commitIndex);
     }
 
     public long getCurrentTerm() {
@@ -48,6 +50,7 @@ public class PecanNode {
 
     public void setCurrentTerm(long currentTerm) {
         this.currentTerm = currentTerm;
+        db.updateFields(currentTerm, votedFor.get(), commitIndex);
     }
 
     public long getCommitIndex() {
@@ -56,6 +59,7 @@ public class PecanNode {
 
     public void setCommitIndex(long commitIndex) {
         this.commitIndex = commitIndex;
+        db.updateFields(currentTerm, votedFor.get(), commitIndex);
     }
 
     /**
@@ -78,13 +82,14 @@ public class PecanNode {
      * Id of known leader according to this node
      */
     int leaderId;
-    AtomicInteger votedFor = new AtomicInteger();
+    private AtomicInteger votedFor = new AtomicInteger(-1);
     /**
      * Current term according to this node
      */
     private long currentTerm = 0;
-    private ArrayList<LogEntry> committedLog = new ArrayList<LogEntry>();
-    private ArrayList<LogEntry> uncommittedLog = new ArrayList<LogEntry>();
+    private List<LogEntry> committedLog = new ArrayList<>();
+    private ArrayList<LogEntry> uncommittedLog = new ArrayList<>();
+    private List<LogEntry> logs;
     private long commitIndex = -1;
     int lastApplied = -1; //index of the highest log entry applied to State Machine
     /**
@@ -117,32 +122,26 @@ public class PecanNode {
         this.peerId = peerId;
         nextIndex = new int[peerId.length];
         Arrays.fill(nextIndex, -1);
+        //Read logs and state from database
         loadLogs();
         loadFields();
         db = new MongoDbImpl(id);
-        logMessage("Node created");
+        writeMessage("Node created");
 
     }
 
     public LogEntry getLog(long searchIndex)
     {
-        if(searchIndex<=commitIndex)
-        {
-            return committedLog.get((int)searchIndex);
-        }
-        if(searchIndex>commitIndex+uncommittedLog.size())
-        {
+        if(searchIndex>=logs.size() || searchIndex<0)
             return null;
-        }
-        return uncommittedLog.get((int)(searchIndex - commitIndex-1)
-        );
+        return logs.get((int)searchIndex);
     }
     public void persistToDb(long commitIndex)
     {
 
     }
 
-    public void logMessage(String message)
+    public void writeMessage(String message)
     {
         logger.info("Info for Node-{} :- {}",id, message);
     }
@@ -152,20 +151,34 @@ public class PecanNode {
         logger.error("Error for Node-{} :- {}",id, message);
     }
 
+    public LogEntry rpcLogToLog(RpcLogEntry log)
+    {
+        return new LogEntry(log.getTerm(), (int)log.getKey(), (int)log.getValue(), log.getIndex());
+    }
+    public List<LogEntry> rpcLogsToLogs(List<RpcLogEntry> rpcLogs)
+    {
+        List<LogEntry> res = new ArrayList<>();
+        rpcLogs.forEach(rpcLog->res.add(rpcLogToLog(rpcLog)));
+        return res;
+    }
+
     public void updateUncommittedLog(List<RpcLogEntry> list, long nodeMatchIndex, long leaderMatchIndex)
     {
-
+        logs.subList((int)nodeMatchIndex, logs.size()).clear();
+        List<LogEntry> rpcLogs =  rpcLogsToLogs(list);
+        logs.addAll(rpcLogs);
+        db.deleteLogs(nodeMatchIndex, logs.size());
+        db.writeLogs(rpcLogs);
     }
 
     public void loadLogs()
     {
-        committedLog = (ArrayList<LogEntry>) db.readCommLogsFromDb();
-        if(committedLog==null)
-            committedLog = new ArrayList<>();
 
-        uncommittedLog = (ArrayList<LogEntry>) db.readUnCommLogsFromDb();
-        if(uncommittedLog==null)
-            uncommittedLog = new ArrayList<>();
+        logs = db.readLogs();
+        if(logs == null)
+        {
+            logs = new ArrayList<>();
+        }
     }
 
     public void loadFields()
@@ -182,14 +195,12 @@ public class PecanNode {
     }
     public LogEntry getLastLog()
     {
-        if(uncommittedLog.size()>0)
+
+        if(logs.size()>0)
         {
-            return uncommittedLog.get(uncommittedLog.size()-1);
+            return logs.get(logs.size()-1);
         }
-        else
-        {
-            return committedLog.get(committedLog.size()-1);
-        }
+        return null;
     }
 
     public List<LogEntry> getLogs(int start, int end)
@@ -197,24 +208,27 @@ public class PecanNode {
 
         if(end == -1)
         {
-            end = committedLog.size() + uncommittedLog.size()-1;
+            end = logs.size()-1;
         }
+        if(end>logs.size() || logs.size()==0)
+            return null;
         List <LogEntry> result = new ArrayList<>(end-start+1);
-        while(start<committedLog.size())
-        {
-            result.add(committedLog.get(start));
-            start++;
-        }
         while(start<=end)
         {
-            result.add(uncommittedLog.get(start-committedLog.size()));
+            result.add(logs.get(start));
             start++;
         }
-        return result;
+        return logs;
+
     }
     public LogEntry getLastCommittedLog()
     {
-        return committedLog.get(committedLog.size()-1);
+        //return committedLog.get(committedLog.size()-1);
+        if(commitIndex>=0)
+        {
+            return logs.get((int)commitIndex);
+        }
+        return null;
     }
 
 

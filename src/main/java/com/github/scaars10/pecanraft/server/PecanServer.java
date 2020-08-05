@@ -61,7 +61,7 @@ public class PecanServer {
         this.rpcClient = new RaftGrpcServiceClient(node);
 
         startServer();
-        node.logMessage("Server for node-"+id+" created");
+        node.writeMessage("Server for node-"+id+" created");
     }
 
 
@@ -124,14 +124,14 @@ public class PecanServer {
     void startElection()
     {
         //Startup Election
-        node.logMessage("Timed out. No heartbeat received from leader with " +
+        node.writeMessage("Timed out. No heartbeat received from leader with " +
                 "(id-"+node.leaderId+"). Starting a new election");
 
         //obtain a writeLock to ensure safety
         node.nodeLock.writeLock().lock();
         //change the state to candidate
         node.nodeState = PecanNode.possibleStates.CANDIDATE;
-        node.votedFor.set(node.id);
+        node.setVotedFor(node.id);
         node.setCurrentTerm(node.getCurrentTerm()+1);
         AtomicInteger voteCount = new AtomicInteger(1);
         //release the writeLock
@@ -165,7 +165,7 @@ public class PecanServer {
                 }
                 //catching Exceptions
                 catch (Exception e) {
-                    node.logMessage("General Exception for - node-" + node.peerId[finalI]);
+                    node.writeMessage("General Exception for - node-" + node.peerId[finalI]);
                     e.printStackTrace();
                 }
             });
@@ -233,13 +233,6 @@ public class PecanServer {
             }
             startElection();
         });
-//        new Thread(() -> {
-//            ScheduledFuture election = electionTimer.schedule(new StartElection(),
-//                    randomTime, TimeUnit.MILLISECONDS);
-//        }).start();
-
-
-
 
 
     }
@@ -258,15 +251,15 @@ public class PecanServer {
 
     }
 
-    public void updateStatus(long term, int leaderId, int votedFor)
+    public void updateStatus(long term, int leaderId, int newvotedFor)
     {
         node.setCurrentTerm(term);
         node.nodeState = PecanNode.possibleStates.FOLLOWER;
         node.leaderId = leaderId;
-        if(votedFor>=0)
-            node.votedFor.set(votedFor);
+        if(newvotedFor>=0)
+            node.setVotedFor(newvotedFor);
         else
-            node.votedFor = null;
+            node.setVotedFor(-1);
     }
 
 
@@ -335,9 +328,20 @@ public class PecanServer {
                                         setMatchIndex(nodeMatchIndex).build();
                                     responseObserver.onNext(response);
                                     responseObserver.onCompleted();
-                                    node.updateUncommittedLog(value.getLogEntriesList(), nodeMatchIndex, leaderMatchIndex);
-                                    node.persistToDb(value.getCommitIndex());
-                                    node.setCommitIndex(value.getCommitIndex());
+                                    long finalLeaderMatchIndex = leaderMatchIndex;
+                                    long finalNodeMatchIndex = nodeMatchIndex;
+                                    Thread dbThread = new Thread(()->
+                                    {
+                                        node.updateUncommittedLog(value.getLogEntriesList().subList
+                                                        ((int) finalLeaderMatchIndex, value.getLogEntriesCount()),
+                                                finalNodeMatchIndex, finalLeaderMatchIndex);
+
+                                        node.setCommitIndex(value.getCommitIndex());
+                                    });
+                                    dbThread.start();
+
+
+
                                 } else {
                                     AppendEntriesResponse response = AppendEntriesResponse.newBuilder().
                                             setResponseCode(AppendEntriesResponse.ResponseCodes.MORE).
@@ -389,7 +393,7 @@ public class PecanServer {
                 updateStatus(request.getTerm(), node.leaderId, -1);
             }
 
-            if(((node.votedFor.get()==candidateId) || (node.votedFor == null))
+            if(((node.getVotedFor()==candidateId) || (node.getVotedFor()==-1))
              && (!checkIfServerIsBehind(candidateTerm, lastLogIndex, lastLogTerm)))
             {
                 response = RequestVoteResponse.newBuilder().setVoteGranted(true).build();
