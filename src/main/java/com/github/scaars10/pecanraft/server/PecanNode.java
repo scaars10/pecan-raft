@@ -32,7 +32,7 @@ public class PecanNode {
     int heartbeat = 50;
 
     //interval after which follower is allowed to become a candidate if a heartbeat is not received from leader
-    int leaderTimeout = 1000;
+    int leaderTimeout = 10000;
 
     public int getVotedFor() {
         return votedFor.get();
@@ -81,7 +81,7 @@ public class PecanNode {
     /**
      * Id of known leader according to this node
      */
-    int leaderId;
+    int leaderId = -1;
     private AtomicInteger votedFor = new AtomicInteger(-1);
     /**
      * Current term according to this node
@@ -96,7 +96,7 @@ public class PecanNode {
      * peerId Stores the ids of peers and nextIndex stores the index of the next entry to be sent
      * to those nodes as a leader
      */
-    int []peerId, nextIndex;
+    int []peerId;long[] nextIndex;
 
     /**
      * Initial Node state. All nodes are followers in the beginning.
@@ -115,17 +115,18 @@ public class PecanNode {
         uncommittedLog.add(new LogEntry(currentTerm, key, value, lastIndex+1));
 
     }
-    public PecanNode(int id, int []peerId)
+    public PecanNode(int id, PecanConfig config)
     {
 
         this.id = id;
-        this.peerId = peerId;
-        nextIndex = new int[peerId.length];
+        this.peerId = config.getPeerId();
+        nextIndex = new long[peerId.length];
         Arrays.fill(nextIndex, -1);
+        db = new MongoDbImpl(id);
         //Read logs and state from database
         loadLogs();
         loadFields();
-        db = new MongoDbImpl(id);
+
         writeMessage("Node created");
 
     }
@@ -146,6 +147,11 @@ public class PecanNode {
         logger.info("Info for Node-{} :- {}",id, message);
     }
 
+    public void writeDebugMsg(String message)
+    {
+
+        logger.debug("Info for Node-{} :- {}",id, message);
+    }
     public void logError(String message)
     {
         logger.error("Error for Node-{} :- {}",id, message);
@@ -181,6 +187,10 @@ public class PecanNode {
         }
     }
 
+    public long getLogSize()
+    {
+        return logs.size();
+    }
     public void loadFields()
     {
         Map<String, Long> map = db.getFields();
@@ -191,6 +201,10 @@ public class PecanNode {
             long temp = map.get("votedFor");
             votedFor.set((int) temp);
             commitIndex = map.get("commitIndex");
+        }
+        else
+        {
+            db.persistFieldToDb(currentTerm, votedFor.get(), commitIndex);
         }
     }
     public LogEntry getLastLog()

@@ -28,13 +28,13 @@ public class MongoDbImpl implements DbBase
         logCollection = database.getCollection("node_"+id+"_logs");
         uncommLogCollection = database.getCollection("node_uncommittedLog_"+id);
         fieldCollection = database.getCollection("node_field_"+id);
-
+        System.out.println("Initialized Database connections");
     }
 
     @Override
     public void writeCommittedLogs(List<LogEntry> logs)
     {
-        dbLock.writeLock().lock();
+        //dbLock.writeLock().lock();
         logs.parallelStream().forEach((log)->
         {
             Document doc = new Document("index", new ObjectId(String.valueOf(log.getIndex())))
@@ -42,14 +42,14 @@ public class MongoDbImpl implements DbBase
                     .append("value", log.getValue()).append("key", log.getKey());
             commLogCollection.insertOne(doc);
         });
-        dbLock.writeLock().unlock();
+        //dbLock.writeLock().unlock();
 
     }
 
     @Override
     public void writeLogs(List<LogEntry> logs)
     {
-        dbLock.writeLock().lock();
+        //dbLock.writeLock().lock();
         logs.parallelStream().forEach((log)->
         {
             Document doc = new Document("index", log.getIndex())
@@ -57,18 +57,18 @@ public class MongoDbImpl implements DbBase
                     .append("value", log.getValue()).append("key", log.getKey());
             logCollection.insertOne(doc);
         });
-        dbLock.writeLock().unlock();
+        //dbLock.writeLock().unlock();
     }
 
     @Override
     public List<LogEntry> readLogs()
     {
-        dbLock.readLock().lock();
+        //dbLock.readLock().lock();
         List <LogEntry> list = new ArrayList<>();
         if(logCollection.countDocuments()==0)
             return null;
         logCollection.find().iterator().forEachRemaining(log-> list.add(documentToLog(log)));
-        dbLock.readLock().unlock();
+        //dbLock.readLock().unlock();
         return list;
     }
 
@@ -82,7 +82,7 @@ public class MongoDbImpl implements DbBase
     @Override
     public void writeUncommittedLogs(List<LogEntry> logs)
     {
-        dbLock.writeLock().lock();
+        //dbLock.writeLock().lock();
         logs.parallelStream().forEach((log)->
         {
             Document doc = new Document("index", new ObjectId(String.valueOf(log.getIndex())))
@@ -90,13 +90,13 @@ public class MongoDbImpl implements DbBase
                     .append("value", log.getValue()).append("key", log.getKey());
             uncommLogCollection.insertOne(doc);
         });
-        dbLock.writeLock().unlock();
+        //dbLock.writeLock().unlock();
     }
 
     @Override
     public void persistFieldToDb(long currentTerm, int votedFor, long commitIndex)
     {
-        dbLock.writeLock().lock();
+        //dbLock.writeLock().lock();
         Document doc = new Document("id",1).append("term", currentTerm)
                 .append("votedFor", votedFor).append("commitIndex", commitIndex);
 
@@ -108,13 +108,15 @@ public class MongoDbImpl implements DbBase
         {
             fieldCollection.updateOne(eq("id", 1), doc);
         }
-        dbLock.writeLock().unlock();
+        //dbLock.writeLock().unlock();
     }
 
     @Override
-    public void updateFields(long currentTerm, int votedFor, long commitIndex) {
-
+    public void updateFields(long currentTerm, int votedFor, long commitIndex)
+    {
+       // System.out.println(currentTerm+" "+votedFor+" "+commitIndex);
         Document temp =fieldCollection.find(eq("id", 1)).first();
+       // System.out.println("Doc found..");
         if(currentTerm>=0)
         {
 
@@ -131,8 +133,11 @@ public class MongoDbImpl implements DbBase
             if(temp!=null)
                 temp.replace("commitIndex", commitIndex);
         }
-        assert temp != null;
-        fieldCollection.updateOne(eq("id", 1), temp);
+       // System.out.println("Temp created..");
+        Document replacement = new Document("id", 1).append("term", currentTerm)
+                .append("votedFor", votedFor).append("commitIndex", commitIndex);
+        fieldCollection.replaceOne(eq("id", 1), replacement);
+        //System.out.println("Done Updating fields..");
     }
 
     public LogEntry documentToLog(Document doc)
@@ -144,38 +149,39 @@ public class MongoDbImpl implements DbBase
     @Override
     public List<LogEntry> readCommLogsFromDb()
     {
-        dbLock.readLock().lock();
+        //dbLock.readLock().lock();
         List <LogEntry> list = new ArrayList<>();
         if(commLogCollection.countDocuments()==0)
             return null;
         commLogCollection.find().iterator().forEachRemaining(log-> list.add(documentToLog(log)));
-        dbLock.readLock().unlock();
+        //dbLock.readLock().unlock();
         return list;
     }
 
     @Override
     public List<LogEntry> readUnCommLogsFromDb()
     {
-        dbLock.readLock().lock();
+        //dbLock.readLock().lock();
         List <LogEntry> list = new ArrayList<>();
         if(uncommLogCollection.countDocuments()==0)
             return null;
         uncommLogCollection.find().iterator().forEachRemaining(log-> list.add(documentToLog(log)));
-        dbLock.readLock().unlock();
+        //dbLock.readLock().unlock();
         return list;
     }
 
     @Override
     public Map<String, Long> getFields()
     {
-        dbLock.readLock().lock();
+        //dbLock.readLock().lock();
         if(fieldCollection.countDocuments()==0)
             return null;
         Document doc = fieldCollection.find().first();
-        dbLock.readLock().unlock();
+        //dbLock.readLock().unlock();
         assert doc != null;
         Map<String, Long> map = new HashMap<>();
-        map.put("votedFor", (long) doc.get("votedFor"));
+        int temp = doc.getInteger("votedFor");
+        map.put("votedFor", (long) temp);
         map.put("term", (long) doc.get("term"));
         map.put("commitIndex", (long) doc.get("commitIndex"));
         return map;
