@@ -70,8 +70,8 @@ public class PecanServer {
         System.out.println("Starting for node "+node.id);
         startFollower();
     }
-    ExecutorService electionExecutor = Executors.newFixedThreadPool(1);
-    Future<?> electionFuture;
+    ScheduledExecutorService electionExecutor = Executors.newScheduledThreadPool(1);
+    ScheduledFuture electionFuture;
 
 
     /**
@@ -137,6 +137,8 @@ public class PecanServer {
 
         //create a list of Futures, so you know when each tick is done
         final List<Future> futures = new ArrayList<>();
+        if(node.nodeState == PecanNode.possibleStates.FOLLOWER)
+            return;
         for(int i=0;i<node.peerId.length;i++)
         {
             if(node.peerId[i]==node.id)
@@ -173,7 +175,9 @@ public class PecanServer {
             try
             {
                 Thread.sleep(20);
-            } catch (InterruptedException e) {
+            } catch (InterruptedException e)
+            {
+                System.out.println("Election Sleep interrupted for "+node.id);
                 e.printStackTrace();
             }
 
@@ -183,6 +187,7 @@ public class PecanServer {
                     if(future.isDone())
                         future.get();
                 } catch (Exception e) {
+
                     e.printStackTrace();
                 }
             }
@@ -190,15 +195,6 @@ public class PecanServer {
             if(node.nodeState== PecanNode.possibleStates.FOLLOWER ||
                     voteCount.get()>(node.peerId.length-1)/2)
             {
-//                for (final Future<?> future : futures)
-//                {
-//                    try {
-//                        if(!future.isDone())
-//                            future.cancel(true);
-//                    } catch (Exception e) {
-//                        e.printStackTrace();
-//                    }
-//                }
                 break;
             }
 
@@ -227,15 +223,7 @@ public class PecanServer {
         System.out.println("Election timer for node "+node.id+" started");
         Random rand= new Random();
         int randomTime = (int) (node.leaderTimeout + rand.nextDouble()*150);
-        electionFuture = electionExecutor.submit(() -> {
-                try {
-                Thread.sleep(randomTime);
-            } catch (InterruptedException e) {
-                System.out.println("sleep interrupted For node "+node.id);
-                e.printStackTrace();
-            }
-            startElection();
-        });
+        electionFuture = electionExecutor.schedule((this::startElection),randomTime, TimeUnit.MILLISECONDS);
 
 
     }
@@ -246,10 +234,9 @@ public class PecanServer {
     }
     void stopElectionTimer()
     {
-        if(!(electionFuture.isDone() || electionFuture.isCancelled()))
+        if(electionFuture!=null && !(electionFuture.isDone() || electionFuture.isCancelled()))
             electionFuture.cancel(true);
-        System.out.println(electionExecutor.shutdownNow());
-        electionExecutor = Executors.newFixedThreadPool(1);
+
 
     }
 
@@ -312,6 +299,7 @@ public class PecanServer {
                         responseObserver.onCompleted();
                     }
                     else {
+                        updateStatus(value.getTerm(), value.getLeaderId(), -1);
                         System.out.println("For node"+node.id+" AE succeeded from "+value.getLeaderId());
 
                         restartElectionTimer();
@@ -424,7 +412,6 @@ public class PecanServer {
             }
             responseObserver.onNext(response);
             responseObserver.onCompleted();
-            restartElectionTimer();
         }
 
         @Override
