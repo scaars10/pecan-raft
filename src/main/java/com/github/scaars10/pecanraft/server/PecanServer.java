@@ -5,6 +5,7 @@ import com.github.scaars10.pecanraft.ClientRequest;
 import com.github.scaars10.pecanraft.ClientResponse;
 import com.github.scaars10.pecanraft.*;
 import com.github.scaars10.pecanraft.structures.LogEntry;
+import com.github.scaars10.pecanraft.utility.ResettableCountDownLatch;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.Server;
@@ -22,7 +23,12 @@ public class PecanServer {
     RaftServiceImpl raftService;
     RaftGrpcServiceClient rpcClient;
     Thread serverThread;
-
+    /**
+      Consensus latch is used to make the leader wait before it sends response to client
+        and see if the leader is still a leader, it waits for a positive reply from
+        majority of nodes in its AppendEntries routine.
+     **/
+    ResettableCountDownLatch consensusLatch = new ResettableCountDownLatch(1);
 
     PecanNode node;
 
@@ -84,8 +90,10 @@ public class PecanServer {
         while(node.nodeState == PecanNode.possibleStates.LEADER)
         {
             new Thread(this::allAppendEntries).start();
+
             try {
                 Thread.sleep(node.heartbeat);
+                consensusLatch.countDown();
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
@@ -97,6 +105,7 @@ public class PecanServer {
 
     void allAppendEntries()
     {
+        AtomicInteger positiveCount = new AtomicInteger(1);
         System.out.println("Append Entry routine started for node "+node.id);
         new Thread(()->
         {
@@ -417,18 +426,39 @@ public class PecanServer {
         @Override
         public void systemService(ClientRequest request, StreamObserver<ClientResponse> responseObserver) {
             ClientResponse response;
-            if(node.id != node.leaderId)
+            if(node.nodeState != PecanNode.possibleStates.LEADER)
             {
                 response = ClientResponse.newBuilder().setLeaderId(node.leaderId)
                 .setSuccess(false).build();
             }
             else
             {
-                response = ClientResponse.newBuilder()
-                        .setSuccess(true).build();
-                int key = request.getKey();
-                int value = request.getValue();
-                node.addToUncommittedLog(key, value);
+                boolean result = false;
+
+
+                try {
+                    result = consensusLatch.await(1000,TimeUnit.MILLISECONDS);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                finally {
+                    consensusLatch.reset();
+                }
+                if(!result || node.nodeState != PecanNode.possibleStates.LEADER)
+                {
+                    response = ClientResponse.newBuilder()
+                            .setSuccess(false).build();
+                }
+                else
+                {
+                    response = ClientResponse.newBuilder()
+                            .setSuccess(true).build();
+                    int key = request.getKey();
+                    int value = request.getValue();
+                    node.addToUncommittedLog(key, value);
+                }
+
+
             }
             responseObserver.onNext(response);
             responseObserver.onCompleted();

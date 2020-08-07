@@ -6,6 +6,7 @@ public class PecanConfig {
 
     static Map <Integer, Integer> idToPort = new HashMap<>();
     int []peerId;
+
     public PecanConfig(int numServers)
     {
         peerId = new int[numServers];
