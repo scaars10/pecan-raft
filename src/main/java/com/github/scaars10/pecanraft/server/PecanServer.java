@@ -87,8 +87,13 @@ public class PecanServer {
     void startLeader()
     {
         System.out.println("New Leader - "+node.id+" in term "+node.getCurrentTerm());
-        while(node.nodeState == PecanNode.possibleStates.LEADER)
+        while(true)
         {
+            node.nodeLock.readLock().lock();
+            PecanNode.possibleStates state = node.nodeState;
+            node.nodeLock.readLock().unlock();
+            if(state!= PecanNode.possibleStates.LEADER)
+                break;
             new Thread(this::allAppendEntries).start();
 
             try {
@@ -137,6 +142,7 @@ public class PecanServer {
         node.nodeState = PecanNode.possibleStates.CANDIDATE;
         node.setVotedFor(node.id);
         node.setCurrentTerm(node.getCurrentTerm()+1);
+        long currentTerm = node.getCurrentTerm();
         //System.out.println("For node "+node.id+" current term "+node.getCurrentTerm());
         AtomicInteger voteCount = new AtomicInteger(1);
         //release the writeLock
@@ -146,10 +152,10 @@ public class PecanServer {
 
         //create a list of Futures, so you know when each tick is done
         final List<Future> futures = new ArrayList<>();
-        if(node.nodeState == PecanNode.possibleStates.FOLLOWER)
-            return;
+
         for(int i=0;i<node.peerId.length;i++)
         {
+            restartElectionTimer();
             if(node.peerId[i]==node.id)
                 continue;
 
@@ -165,7 +171,7 @@ public class PecanServer {
                     if (res.getVoteGranted()) {
                         voteCount.incrementAndGet();
                     }
-                    else
+                    else if(res.getTerm()>currentTerm)
                     {
                         updateStatus(res.getTerm(), -1, -1);
                     }
@@ -200,8 +206,11 @@ public class PecanServer {
                     e.printStackTrace();
                 }
             }
+            node.nodeLock.readLock().lock();
+            PecanNode.possibleStates state = node.nodeState;
+            node.nodeLock.readLock().unlock();
             //stop waiting if a new leader was elected meanwhile or this candidate has obtained majority of votes
-            if(node.nodeState== PecanNode.possibleStates.FOLLOWER ||
+            if(state== PecanNode.possibleStates.FOLLOWER ||
                     voteCount.get()>(node.peerId.length-1)/2)
             {
                 break;
@@ -214,15 +223,14 @@ public class PecanServer {
             System.out.println("Node "+node.id+" has won the election for term "+node.getCurrentTerm());
             node.nodeState = PecanNode.possibleStates.LEADER;
             startLeader();
-            return;
+
         }
-        restartElectionTimer();
+
 
     }
 
     LogEntry getDummyLog()
     {
-
 
         return new LogEntry(-1, -1, -1, -1);
 
@@ -252,6 +260,7 @@ public class PecanServer {
 
     public void updateStatus(long term, int leaderId, int newvotedFor)
     {
+
         node.setCurrentTerm(term);
         node.nodeState = PecanNode.possibleStates.FOLLOWER;
         node.leaderId = leaderId;
@@ -261,6 +270,10 @@ public class PecanServer {
             node.setVotedFor(-1);
     }
 
+    public boolean isDummyLog(RpcLogEntry log)
+    {
+        return log.getIndex() == -1;
+    }
 
     public class RaftServiceImpl extends RaftNodeRpcGrpc.RaftNodeRpcImplBase {
         PecanNode node;
@@ -312,7 +325,11 @@ public class PecanServer {
                         System.out.println("For node"+node.id+" AE succeeded from "+value.getLeaderId());
 
                         restartElectionTimer();
-                        if (value.getLogEntriesCount() == 0) {
+                        if (value.getLogEntriesCount() == 0 || isDummyLog(value.getLogEntriesList().get(0)))
+                        {
+                            AppendEntriesResponse response = AppendEntriesResponse.newBuilder()
+                                    .setResponseCode(AppendEntriesResponse.ResponseCodes.SUCCESS).build();
+                            responseObserver.onNext(response);
                             responseObserver.onCompleted();
                         } else {
                             long nodeMatchIndex = node.getCommitIndex()
@@ -392,45 +409,51 @@ public class PecanServer {
         public void requestVote(com.github.scaars10.pecanraft.RequestVoteRequest request,
                 StreamObserver<com.github.scaars10.pecanraft.RequestVoteResponse> responseObserver)
         {
-            System.out.println("Node "+node.id+" received vote request from "+request.getCandidateId());
-            long candidateTerm = request.getTerm(), lastLogIndex = request.getLastLogIndex(),
-            lastLogTerm = request.getLastLogTerm();
-            int candidateId = request.getCandidateId();
-            com.github.scaars10.pecanraft.RequestVoteResponse response;
+            try {
+                node.nodeLock.writeLock().lock();
+                System.out.println("Node " + node.id + " received vote request from " + request.getCandidateId());
+                long candidateTerm = request.getTerm(), lastLogIndex = request.getLastLogIndex(),
+                        lastLogTerm = request.getLastLogTerm();
+                int candidateId = request.getCandidateId();
+                com.github.scaars10.pecanraft.RequestVoteResponse response;
 
-            if(node.getCurrentTerm()<request.getTerm())
-            {
-                updateStatus(request.getTerm(), node.leaderId, -1);
+                if (node.getCurrentTerm() < request.getTerm()) {
+                    updateStatus(request.getTerm(), node.leaderId, -1);
+                }
+
+                if (((node.getVotedFor() == candidateId) || (node.getVotedFor() == -1))
+                        && (!checkIfServerIsBehind(candidateTerm, lastLogIndex, lastLogTerm))) {
+                    response = RequestVoteResponse.newBuilder().setVoteGranted(true).build();
+                    restartElectionTimer();
+                    System.out.println("Node " + node.id + " voted for node " + request.getCandidateId()
+                            + " in term " + node.getCurrentTerm());
+                    updateStatus(request.getTerm(), request.getCandidateId(), request.getCandidateId());
+
+                } else {
+                    response = RequestVoteResponse.newBuilder().setTerm(node.getCurrentTerm()).
+                            setVoteGranted(false).build();
+
+                }
+                responseObserver.onNext(response);
+                responseObserver.onCompleted();
             }
-
-            if(((node.getVotedFor()==candidateId) || (node.getVotedFor()==-1))
-             && (!checkIfServerIsBehind(candidateTerm, lastLogIndex, lastLogTerm)))
-            {
-                response = RequestVoteResponse.newBuilder().setVoteGranted(true).build();
-                restartElectionTimer();
-                System.out.println("Node "+node.id+" voted for node "+ request.getCandidateId()
-                +" in term "+node.getCurrentTerm());
-                updateStatus(request.getTerm(), request.getCandidateId(), request.getCandidateId());
-
+            finally {
+                node.nodeLock.writeLock().unlock();
             }
-            else
-            {
-                response = RequestVoteResponse.newBuilder().setTerm(node.getCurrentTerm()).
-                        setVoteGranted(false).build();
-
-            }
-            responseObserver.onNext(response);
-            responseObserver.onCompleted();
         }
 
         @Override
         public void systemService(ClientRequest request, StreamObserver<ClientResponse> responseObserver) {
             ClientResponse response;
-            if(node.nodeState != PecanNode.possibleStates.LEADER)
+            node.nodeLock.readLock().lock();
+            PecanNode.possibleStates state = node.nodeState;
+            node.nodeLock.readLock().unlock();
+            if(state != PecanNode.possibleStates.LEADER)
             {
                 response = ClientResponse.newBuilder().setLeaderId(node.leaderId)
                 .setSuccess(false).build();
             }
+
             else
             {
                 boolean result = false;
@@ -444,7 +467,10 @@ public class PecanServer {
                 finally {
                     consensusLatch.reset();
                 }
-                if(!result || node.nodeState != PecanNode.possibleStates.LEADER)
+                node.nodeLock.readLock().lock();
+                state = node.nodeState;
+                node.nodeLock.readLock().unlock();
+                if(!result || state != PecanNode.possibleStates.LEADER)
                 {
                     response = ClientResponse.newBuilder()
                             .setSuccess(false).build();
@@ -455,13 +481,16 @@ public class PecanServer {
                             .setSuccess(true).build();
                     int key = request.getKey();
                     int value = request.getValue();
+                    node.nodeLock.writeLock().lock();
                     node.addToUncommittedLog(key, value);
+                    node.nodeLock.writeLock().unlock();
                 }
 
 
             }
             responseObserver.onNext(response);
             responseObserver.onCompleted();
+
         }
     }
 
@@ -482,7 +511,9 @@ public class PecanServer {
             try {
 
                 RaftNodeRpcGrpc.RaftNodeRpcBlockingStub client = RaftNodeRpcGrpc.newBlockingStub(channel);
+                node.logLock.readLock().lock();
                 LogEntry lastLog = node.getLastCommittedLog();
+                node.logLock.readLock().unlock();
                 if (lastLog == null) {
                     lastLog = new LogEntry(-1, -1, -1, -1);
                 }
@@ -520,14 +551,18 @@ public class PecanServer {
                     if(value.getResponseCode() == AppendEntriesResponse.ResponseCodes.MORE)
                     {
                         long index = value.getMatchIndex();
+
+                        node.logLock.readLock().lock();
                         List<LogEntry> logs = node.getLogs((int) index, -1);
+                        LogEntry lastLog = node.getLastLog();
+                        node.logLock.readLock().unlock();
+
                         List <RpcLogEntry> rpcLogs = new ArrayList<>();
                         logs.forEach(log-> rpcLogs.add(RpcLogEntry.newBuilder()
                                 .setIndex(log.getIndex()).setTerm(log.getTerm())
                                 .setKey(log.getKey()).setValue(log.getValue())
                                 .build()));
 
-                        LogEntry lastLog = node.getLastLog();
                         if(lastLog == null)
                         {
                             lastLog = new LogEntry(-1, -1, -1, -1);
@@ -560,13 +595,18 @@ public class PecanServer {
                 }
             });
             requestObserverRef.set(streamObserver);
+
+            node.logLock.readLock().lock();
             LogEntry lastLog = node.getLastLog();
+            List<LogEntry> logs = node.getLogs((int)
+                    Math.max(node.nextIndex[nodeId]-1, node.getCommitIndex()), -1);
+            node.logLock.readLock().unlock();
+
             if(lastLog == null)
             {
                 lastLog = new LogEntry(-1, -1, -1, -1);
             }
-            List<LogEntry> logs = node.getLogs((int)
-                    Math.max(node.nextIndex[nodeId], node.getCommitIndex()), -1);
+
             List <RpcLogEntry> rpcLogs = new ArrayList<>();
             if(logs==null)
             {

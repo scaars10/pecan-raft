@@ -5,7 +5,7 @@ import com.github.scaars10.pecanraft.server.db.DbBase;
 import com.github.scaars10.pecanraft.server.db.MongoDbImpl;
 import com.github.scaars10.pecanraft.structures.LogEntry;
 
-import javafx.util.Pair;
+
 
 
 
@@ -87,8 +87,8 @@ public class PecanNode {
      * Current term according to this node
      */
     private long currentTerm = 0;
-    private List<LogEntry> committedLog = new ArrayList<>();
-    private ArrayList<LogEntry> uncommittedLog = new ArrayList<>();
+
+
     private List<LogEntry> logs;
     private long commitIndex = -1;
     int lastApplied = -1; //index of the highest log entry applied to State Machine
@@ -112,7 +112,7 @@ public class PecanNode {
             lastIndex = -1;
         else
             lastIndex = lastLog.getIndex();
-        uncommittedLog.add(new LogEntry(currentTerm, key, value, lastIndex+1));
+       logs.add(new LogEntry(currentTerm, key, value, lastIndex+1));
 
     }
     public PecanNode(int id, PecanConfig config)
@@ -137,10 +137,7 @@ public class PecanNode {
             return null;
         return logs.get((int)searchIndex);
     }
-    public void persistToDb(long commitIndex)
-    {
 
-    }
 
     public void writeMessage(String message)
     {
@@ -232,7 +229,7 @@ public class PecanNode {
             result.add(logs.get(start));
             start++;
         }
-        return logs;
+        return result;
 
     }
     public LogEntry getLastCommittedLog()
