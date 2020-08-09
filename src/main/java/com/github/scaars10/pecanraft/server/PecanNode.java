@@ -91,7 +91,7 @@ public class PecanNode {
 
     private List<LogEntry> logs;
     private long commitIndex = -1;
-    int lastApplied = -1; //index of the highest log entry applied to State Machine
+    long lastApplied = -1; //index of the highest log entry applied to State Machine
     /**
      * peerId Stores the ids of peers and nextIndex stores the index of the next entry to be sent
      * to those nodes as a leader
@@ -240,6 +240,16 @@ public class PecanNode {
             return logs.get((int)commitIndex);
         }
         return null;
+    }
+
+    public void writeToKeyValue()
+    {
+        while(lastApplied<=commitIndex)
+        {
+            lastApplied++;
+            db.addToKeyValueStore(logs.get((int)lastApplied).getKey(), logs.get((int)lastApplied).getValue());
+
+        }
     }
 
 

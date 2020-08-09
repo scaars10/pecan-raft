@@ -25,7 +25,7 @@ public class PecanServer {
     Thread serverThread;
     /**
       Consensus latch is used to make the leader wait before it sends response to client
-        and see if the leader is still a leader, it waits for a positive reply from
+        and verify if it is still a leader, it waits for a positive reply from
         majority of nodes in its AppendEntries routine.
      **/
     ResettableCountDownLatch consensusLatch = new ResettableCountDownLatch(1);
@@ -69,6 +69,8 @@ public class PecanServer {
         startServer();
         node.writeMessage("xx Server for node-"+id+" created");
         serverThread.start();
+        applyServiceFuture = applyServiceRoutine.scheduleAtFixedRate(()->node.writeToKeyValue(),
+                node.heartbeat*2, node.heartbeat*2, TimeUnit.MILLISECONDS);
     }
 
     public void start()
@@ -77,7 +79,8 @@ public class PecanServer {
         startFollower();
     }
     ScheduledExecutorService electionExecutor = Executors.newScheduledThreadPool(1);
-    ScheduledFuture electionFuture;
+    ScheduledExecutorService applyServiceRoutine = Executors.newScheduledThreadPool(1);
+    ScheduledFuture electionFuture, applyServiceFuture;
 
 
     /**

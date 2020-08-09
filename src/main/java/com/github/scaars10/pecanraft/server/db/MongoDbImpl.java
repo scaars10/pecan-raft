@@ -18,7 +18,7 @@ public class MongoDbImpl implements DbBase
 {
     private ReentrantReadWriteLock dbLock = new ReentrantReadWriteLock();
     private MongoCollection<Document> commLogCollection,
-            uncommLogCollection,logCollection, fieldCollection;
+            uncommLogCollection,logCollection, fieldCollection, keyValueCollection;
 
     public MongoDbImpl(long id)
     {
@@ -185,5 +185,20 @@ public class MongoDbImpl implements DbBase
         map.put("term", (long) doc.get("term"));
         map.put("commitIndex", (long) doc.get("commitIndex"));
         return map;
+    }
+
+    @Override
+    public void addToKeyValueStore(int key, int value)
+    {
+        Document temp =fieldCollection.find(eq("key", key)).first();
+        Document newDoc = new Document("key", key).append("value", value);
+        if(temp==null)
+        {
+            keyValueCollection.insertOne(newDoc);
+        }
+        else
+        {
+            keyValueCollection.replaceOne(eq("key", key), newDoc);
+        }
     }
 }
