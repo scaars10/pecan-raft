@@ -5,18 +5,17 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
-import javafx.util.Pair;
+
 import org.bson.Document;
 import org.bson.types.ObjectId;
 
 import java.util.*;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.stream.Collectors;
 
 import static com.mongodb.client.model.Filters.*;
 
 public class MongoDbImpl implements DbBase
 {
-    private ReentrantReadWriteLock dbLock = new ReentrantReadWriteLock();
     private MongoCollection<Document> commLogCollection,
             uncommLogCollection,logCollection, fieldCollection, keyValueCollection;
 
@@ -28,6 +27,7 @@ public class MongoDbImpl implements DbBase
         logCollection = database.getCollection("node_"+id+"_logs");
         uncommLogCollection = database.getCollection("node_uncommittedLog_"+id);
         fieldCollection = database.getCollection("node_field_"+id);
+        keyValueCollection = database.getCollection("node_store_"+id);
         System.out.println("Initialized Database connections");
     }
 
@@ -47,16 +47,18 @@ public class MongoDbImpl implements DbBase
     }
 
     @Override
+    public void writeLog(LogEntry log)
+    {
+        Document doc = new Document("index", log.getIndex())
+                .append("term", log.getTerm())
+                .append("value", log.getValue()).append("key", log.getKey());
+        logCollection.insertOne(doc);
+    }
+    @Override
     public void writeLogs(List<LogEntry> logs)
     {
         //dbLock.writeLock().lock();
-        logs.parallelStream().forEach((log)->
-        {
-            Document doc = new Document("index", log.getIndex())
-                    .append("term", log.getTerm())
-                    .append("value", log.getValue()).append("key", log.getKey());
-            logCollection.insertOne(doc);
-        });
+        logs.forEach(this::writeLog);
         //dbLock.writeLock().unlock();
     }
 
@@ -68,6 +70,11 @@ public class MongoDbImpl implements DbBase
         if(logCollection.countDocuments()==0)
             return null;
         logCollection.find().iterator().forEachRemaining(log-> list.add(documentToLog(log)));
+        list.sort((a, b) ->
+        {
+            return (int) (a.getIndex() - b.getIndex());
+        });
+        list.forEach((el)-> System.out.println("El1 -"+el.getIndex()));
         //dbLock.readLock().unlock();
         return list;
     }
@@ -75,8 +82,11 @@ public class MongoDbImpl implements DbBase
     @Override
     public void deleteLogs(long startIndex, long endIndex)
     {
+        System.out.println("Initial collection count "+logCollection.countDocuments());
+        System.out.println("Deleting logs from "+startIndex+" to "+endIndex);
         logCollection.deleteMany(and(gte("index",startIndex)
                 , lt("index", endIndex)));
+        System.out.println("collection count "+logCollection.countDocuments());
     }
 
     @Override

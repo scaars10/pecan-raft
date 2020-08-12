@@ -19,5 +19,6 @@ public interface DbBase
     List<LogEntry> readUnCommLogsFromDb();
     Map<String, Long> getFields();
     void addToKeyValueStore(int key, int value);
+    void writeLog(LogEntry log);
 
 }

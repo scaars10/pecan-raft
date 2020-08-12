@@ -5,12 +5,13 @@ import java.util.*;
 public class PecanConfig {
 
     static Map <Integer, Integer> idToPort = new HashMap<>();
+    int num = 3;
     int []peerId;
 
-    public PecanConfig(int numServers)
+    public PecanConfig()
     {
-        peerId = new int[numServers];
-        for(int i=0;i<numServers;i++)
+        peerId = new int[num];
+        for(int i=0;i<num;i++)
         {
             peerId[i] = i;
         }
@@ -22,6 +23,10 @@ public class PecanConfig {
         {
             idToPort.put(i, 50080+i);
         }
+    }
+    public int getNumServer()
+    {
+        return num;
     }
     public static int getPort(int id)
     {

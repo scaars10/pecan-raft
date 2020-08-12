@@ -112,7 +112,9 @@ public class PecanNode {
             lastIndex = -1;
         else
             lastIndex = lastLog.getIndex();
-       logs.add(new LogEntry(currentTerm, key, value, lastIndex+1));
+       LogEntry latestLog = new LogEntry(currentTerm, key, value, lastIndex+1);
+       logs.add(latestLog);
+       db.writeLog(latestLog);
 
     }
     public PecanNode(int id, PecanConfig config)
@@ -167,10 +169,12 @@ public class PecanNode {
 
     public void updateUncommittedLog(List<RpcLogEntry> list, long nodeMatchIndex, long leaderMatchIndex)
     {
-        logs.subList((int)nodeMatchIndex, logs.size()).clear();
+
         List<LogEntry> rpcLogs =  rpcLogsToLogs(list);
-        logs.addAll(rpcLogs);
+
         db.deleteLogs(nodeMatchIndex, logs.size());
+        logs.subList((int)nodeMatchIndex, logs.size()).clear();
+        logs.addAll(rpcLogs);
         db.writeLogs(rpcLogs);
     }
 
@@ -221,14 +225,19 @@ public class PecanNode {
         {
             end = logs.size()-1;
         }
+        if(start<=-1)
+            start=0;
         if(end>logs.size() || logs.size()==0)
             return null;
-        List <LogEntry> result = new ArrayList<>(end-start+1);
+        List <LogEntry> result = new ArrayList<>();
         while(start<=end)
         {
+            System.out.println(start);
             result.add(logs.get(start));
+            System.out.println("I "+logs.get(start).getIndex());
             start++;
         }
+        System.out.println("S "+result.size());
         return result;
 
     }

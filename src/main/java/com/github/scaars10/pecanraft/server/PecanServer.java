@@ -31,11 +31,12 @@ public class PecanServer {
     ResettableCountDownLatch consensusLatch = new ResettableCountDownLatch(1);
 
     PecanNode node;
+    Server server;
 
     //method to start gRpc Server in a separate thread
     private void startServer()
     {
-        Server server = ServerBuilder.forPort(PecanConfig.getPort(node.id)).
+        server = ServerBuilder.forPort(PecanConfig.getPort(node.id)).
                 addService(raftService).build();
 
         serverThread = new Thread(()->
@@ -78,6 +79,33 @@ public class PecanServer {
         System.out.println("Starting for node "+node.id);
         startFollower();
     }
+
+    void stopLeader()
+    {
+        node.nodeLock.writeLock().lock();
+        updateStatus(node.getCurrentTerm(), -1, -1);
+        node.nodeLock.writeLock().unlock();
+    }
+    public void stop()
+    {
+        stopLeader();
+        server.shutdownNow();
+        serverThread.interrupt();
+        try {
+            server.awaitTermination();
+            System.out.println(server.getServices());
+            System.out.println(server.isShutdown() || server.isTerminated());
+            
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+    }
+
+    public boolean isRunning()
+    {
+        return server!=null && !(server.isShutdown() || server.isTerminated());
+    }
     ScheduledExecutorService electionExecutor = Executors.newScheduledThreadPool(1);
     ScheduledExecutorService applyServiceRoutine = Executors.newScheduledThreadPool(1);
     ScheduledFuture electionFuture, applyServiceFuture;
@@ -96,7 +124,10 @@ public class PecanServer {
             PecanNode.possibleStates state = node.nodeState;
             node.nodeLock.readLock().unlock();
             if(state!= PecanNode.possibleStates.LEADER)
+            {
+                System.out.println("Server "+node.id+" no longer leader..");
                 break;
+            }
             new Thread(this::allAppendEntries).start();
 
             try {
@@ -113,8 +144,11 @@ public class PecanServer {
 
     void allAppendEntries()
     {
-        AtomicInteger positiveCount = new AtomicInteger(1);
-        System.out.println("Append Entry routine started for node "+node.id);
+        AtomicInteger successCount = new AtomicInteger(1);
+        node.logLock.readLock().lock();
+        long currentSize = node.getLogSize()-1;
+        node.logLock.readLock().unlock();
+        //System.out.println("Append Entry routine started for node "+node.id);
         new Thread(()->
         {
             List<Integer> peerList = new ArrayList<>();
@@ -124,8 +158,24 @@ public class PecanServer {
                     peerList.add(i);
             }
             peerList.stream().parallel().forEach((peerId) ->
-                    rpcClient.appendEntries("localhost", peerId));
+                    rpcClient.appendEntries("localhost", peerId, successCount));
         }).start();
+
+        for(int i=0;i<20;i++)
+        {
+            try {
+                Thread.sleep(40);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            if(successCount.get()> node.peerId.length/2)
+            {
+                node.nodeLock.writeLock().lock();
+                node.setCommitIndex(currentSize);
+                node.nodeLock.writeLock().unlock();
+            }
+
+        }
 
 
     }
@@ -240,10 +290,10 @@ public class PecanServer {
     }
     void  startElectionTimer()
     {
-        System.out.println("Election timer for node "+node.id+" started");
+        //System.out.println("Election timer for node "+node.id+" started");
         Random rand= new Random();
         int randomTime = (int) (node.leaderTimeout + rand.nextDouble()*150);
-        electionFuture = electionExecutor.schedule((this::startElection),randomTime, TimeUnit.MILLISECONDS);
+        electionFuture = electionExecutor.schedule((this::startElection), randomTime, TimeUnit.MILLISECONDS);
 
 
     }
@@ -256,7 +306,6 @@ public class PecanServer {
     {
         if(electionFuture!=null && !(electionFuture.isDone() || electionFuture.isCancelled()))
             electionFuture.cancel(true);
-
 
     }
 
@@ -306,8 +355,6 @@ public class PecanServer {
             @Override
             public void onNext(AppendEntriesRequest value)
             {
-                System.out.println
-                        ("Node "+node.id+" received AppendEntry rpc received from "+value.getLeaderId());
                 try
                 {
                     node.logLock.writeLock().lock();
@@ -323,9 +370,9 @@ public class PecanServer {
                         responseObserver.onNext(response);
                         responseObserver.onCompleted();
                     }
-                    else {
+                    else
+                    {
                         updateStatus(value.getTerm(), value.getLeaderId(), -1);
-                        System.out.println("For node"+node.id+" AE succeeded from "+value.getLeaderId());
 
                         restartElectionTimer();
                         if (value.getLogEntriesCount() == 0 || isDummyLog(value.getLogEntriesList().get(0)))
@@ -334,48 +381,53 @@ public class PecanServer {
                                     .setResponseCode(AppendEntriesResponse.ResponseCodes.SUCCESS).build();
                             responseObserver.onNext(response);
                             responseObserver.onCompleted();
-                        } else {
-                            long nodeMatchIndex = node.getCommitIndex()
-                                    , leaderMatchIndex = node.getCommitIndex();
-                            LogEntry searchLog;
-                            for (RpcLogEntry log : value.getLogEntriesList())
+                        }
+                        else
+                        {
+                            System.out.println("F "+value.getLogEntriesCount());
+                            List <RpcLogEntry> aeLogs = value.getLogEntriesList();
+                            RpcLogEntry firstLog = aeLogs.get(0);
+                            LogEntry resultLog = node.getLog(firstLog.getIndex());
+                            if(resultLog==null && firstLog.getIndex()==0)
                             {
-                                long logIndex = log.getIndex(), logTerm = log.getTerm();
-                                searchLog = node.getLog(logIndex);
-                                if (searchLog == null || searchLog.getTerm() != logTerm) {
-
-                                    break;
-
-                                } else if (searchLog.getTerm() == logTerm) {
-                                    leaderMatchIndex = logIndex;
-                                    nodeMatchIndex = searchLog.getIndex();
-                                }
-
-                            }
-                            if (nodeMatchIndex > node.getCommitIndex()) {
                                 AppendEntriesResponse response = AppendEntriesResponse.newBuilder().
-                                    setResponseCode(AppendEntriesResponse.ResponseCodes.SUCCESS).
-                                    setMatchIndex(nodeMatchIndex).build();
+                                        setResponseCode(AppendEntriesResponse.ResponseCodes.SUCCESS).build();
                                 responseObserver.onNext(response);
                                 responseObserver.onCompleted();
-                                long finalLeaderMatchIndex = leaderMatchIndex;
-                                long finalNodeMatchIndex = nodeMatchIndex;
-                                Thread dbThread = new Thread(()->
+
+                                System.out.println("Writing to Db..");
+                                new Thread(() ->
                                 {
-                                    node.updateUncommittedLog(value.getLogEntriesList().subList
-                                                    ((int) finalLeaderMatchIndex, value.getLogEntriesCount()),
-                                            finalNodeMatchIndex, finalLeaderMatchIndex);
+                                    node.updateUncommittedLog(value.getLogEntriesList(),
+                                            0, 0);
+                                }).start();
+                            }
 
-                                    node.setCommitIndex(value.getCommitIndex());
-                                });
-                                dbThread.start();
-
-
-
-                            } else {
+                            else if(resultLog!=null && resultLog.getTerm()==firstLog.getTerm())
+                            {
                                 AppendEntriesResponse response = AppendEntriesResponse.newBuilder().
-                                        setResponseCode(AppendEntriesResponse.ResponseCodes.MORE).
-                                        setMatchIndex(nodeMatchIndex).build();
+                                   setResponseCode(AppendEntriesResponse.ResponseCodes.SUCCESS).build();
+                                responseObserver.onNext(response);
+                                responseObserver.onCompleted();
+                                RpcLogEntry lastRpcLog = value.getLogEntries(value.getLogEntriesCount()-1);
+                                LogEntry lastLog = node.getLastLog();
+                                System.out.println("ll " + lastLog.getIndex()+" "+lastLog.getTerm());
+                                System.out.println("lr "+lastRpcLog.getIndex()+" "+lastRpcLog.getTerm());
+                                if((lastLog.getTerm()!=lastRpcLog.getTerm()) ||
+                                        (lastRpcLog.getIndex() != lastLog.getIndex()))
+                                {
+                                    System.out.println("Writing to Db..");
+                                    node.updateUncommittedLog(value.getLogEntriesList(),
+                                                resultLog.getIndex(), 0);
+
+                                }
+                            }
+                            else
+                            {
+                                System.out.println("MORE");
+                                AppendEntriesResponse response = AppendEntriesResponse.newBuilder().
+                                        setResponseCode(AppendEntriesResponse.ResponseCodes.MORE)
+                                        .setMatchIndex(node.getCommitIndex()).build();
                                 responseObserver.onNext(response);
                             }
                         }
@@ -387,11 +439,9 @@ public class PecanServer {
                 }
                 finally
                 {
-                    if(node.logLock.writeLock().isHeldByCurrentThread())
-                        node.logLock.writeLock().unlock();
-
-                    if(node.nodeLock.writeLock().isHeldByCurrentThread())
-                        node.nodeLock.writeLock().unlock();
+                    System.out.println("Released Locks");
+                    node.logLock.writeLock().unlock();
+                    node.nodeLock.writeLock().unlock();
                 }
             }
 
@@ -412,9 +462,10 @@ public class PecanServer {
         public void requestVote(com.github.scaars10.pecanraft.RequestVoteRequest request,
                 StreamObserver<com.github.scaars10.pecanraft.RequestVoteResponse> responseObserver)
         {
-            try {
+            try
+            {
                 node.nodeLock.writeLock().lock();
-                System.out.println("Node " + node.id + " received vote request from " + request.getCandidateId());
+                //System.out.println("Node " + node.id + " received vote request from " + request.getCandidateId());
                 long candidateTerm = request.getTerm(), lastLogIndex = request.getLastLogIndex(),
                         lastLogTerm = request.getLastLogTerm();
                 int candidateId = request.getCandidateId();
@@ -428,8 +479,9 @@ public class PecanServer {
                         && (!checkIfServerIsBehind(candidateTerm, lastLogIndex, lastLogTerm))) {
                     response = RequestVoteResponse.newBuilder().setVoteGranted(true).build();
                     restartElectionTimer();
-                    System.out.println("Node " + node.id + " voted for node " + request.getCandidateId()
+                   /* System.out.println("Node " + node.id + " voted for node " + request.getCandidateId()
                             + " in term " + node.getCurrentTerm());
+                            */
                     updateStatus(request.getTerm(), request.getCandidateId(), request.getCandidateId());
 
                 } else {
@@ -448,6 +500,7 @@ public class PecanServer {
         @Override
         public void systemService(ClientRequest request, StreamObserver<ClientResponse> responseObserver) {
             ClientResponse response;
+            System.out.println("Server "+node.id+" received client request..");
             node.nodeLock.readLock().lock();
             PecanNode.possibleStates state = node.nodeState;
             node.nodeLock.readLock().unlock();
@@ -487,10 +540,12 @@ public class PecanServer {
                     node.nodeLock.writeLock().lock();
                     node.addToUncommittedLog(key, value);
                     node.nodeLock.writeLock().unlock();
+                    System.out.println("Handled Request successfully.. ");
                 }
 
 
             }
+            System.out.println("Handled Request.. ");
             responseObserver.onNext(response);
             responseObserver.onCompleted();
 
@@ -531,14 +586,14 @@ public class PecanServer {
 
         }
 
-        public void appendEntries(String address, int nodeId)
+        public void appendEntries(String address, int nodeId, AtomicInteger successCount)
         {
             CountDownLatch latch = new CountDownLatch(1);
             ManagedChannel channel = ManagedChannelBuilder
                     .forAddress(address, PecanConfig.getPort(nodeId))
                     .usePlaintext()
                     .build();
-            System.out.println("Append Entries req sent to "+nodeId+ "from "+node.id);
+            //System.out.println("Append Entries req sent to "+nodeId+ "from "+node.id);
             RaftNodeRpcGrpc.RaftNodeRpcStub client = RaftNodeRpcGrpc.newStub(channel);
             AtomicReference<StreamObserver<AppendEntriesRequest>> requestObserverRef =
                     new AtomicReference<>();
@@ -547,9 +602,12 @@ public class PecanServer {
                 @Override
                 public void onNext(AppendEntriesResponse value)
                 {
+
                     if(value.getResponseCode() == AppendEntriesResponse.ResponseCodes.OUTDATED)
                     {
+                        node.nodeLock.writeLock().lock();
                         updateStatus(value.getTerm(),-1,-1);
+                        node.nodeLock.writeLock().unlock();
                     }
                     if(value.getResponseCode() == AppendEntriesResponse.ResponseCodes.MORE)
                     {
@@ -558,7 +616,7 @@ public class PecanServer {
                         node.logLock.readLock().lock();
                         List<LogEntry> logs = node.getLogs((int) index, -1);
                         LogEntry lastLog = node.getLastLog();
-                        node.logLock.readLock().unlock();
+
 
                         List <RpcLogEntry> rpcLogs = new ArrayList<>();
                         logs.forEach(log-> rpcLogs.add(RpcLogEntry.newBuilder()
@@ -570,15 +628,19 @@ public class PecanServer {
                         {
                             lastLog = new LogEntry(-1, -1, -1, -1);
                         }
+                        node.nodeLock.readLock().lock();
                         AppendEntriesRequest req = AppendEntriesRequest.newBuilder()
                                 .addAllLogEntries(rpcLogs).setPrevLogTerm(lastLog.getTerm())
                                 .setPrevLogIndex(lastLog.getIndex()).setTerm(node.getCurrentTerm())
                                 .setLeaderId(node.id).setCommitIndex(node.getCommitIndex())
                                 .build();
+                        node.nodeLock.readLock().unlock();
+                        node.logLock.readLock().unlock();
                         requestObserverRef.get().onNext(req);
                     }
                     if(value.getResponseCode()== AppendEntriesResponse.ResponseCodes.SUCCESS)
                     {
+                        successCount.incrementAndGet();
                         node.nextIndex[nodeId] =
                                 node.getLogSize();
                     }
@@ -602,7 +664,7 @@ public class PecanServer {
             node.logLock.readLock().lock();
             LogEntry lastLog = node.getLastLog();
             List<LogEntry> logs = node.getLogs((int)
-                    Math.max(node.nextIndex[nodeId]-1, node.getCommitIndex()), -1);
+                    Math.min(node.nextIndex[nodeId]-1, node.getCommitIndex()), -1);
             node.logLock.readLock().unlock();
 
             if(lastLog == null)
