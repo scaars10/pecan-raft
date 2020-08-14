@@ -70,8 +70,7 @@ public class PecanServer {
         startServer();
         node.writeMessage("xx Server for node-"+id+" created");
         serverThread.start();
-        applyServiceFuture = applyServiceRoutine.scheduleAtFixedRate(()->node.writeToKeyValue(),
-                node.heartbeat*2, node.heartbeat*2, TimeUnit.MILLISECONDS);
+
     }
 
     public void start()
@@ -86,6 +85,11 @@ public class PecanServer {
         updateStatus(node.getCurrentTerm(), -1, -1);
         node.nodeLock.writeLock().unlock();
     }
+
+    /** FIXME:
+     *      Method to stop the server but it does not completely stop the server, probably because of
+     *      some gRpc services still running. Only way to stop server as of now is to shut down the program..
+     */
     public void stop()
     {
         stopLeader();
@@ -107,8 +111,8 @@ public class PecanServer {
         return server!=null && !(server.isShutdown() || server.isTerminated());
     }
     ScheduledExecutorService electionExecutor = Executors.newScheduledThreadPool(1);
-    ScheduledExecutorService applyServiceRoutine = Executors.newScheduledThreadPool(1);
-    ScheduledFuture electionFuture, applyServiceFuture;
+
+    ScheduledFuture electionFuture;
 
 
     /**
@@ -179,6 +183,8 @@ public class PecanServer {
 
 
     }
+
+
     void startFollower()
     {
         startElectionTimer();
@@ -242,6 +248,9 @@ public class PecanServer {
         {
             try
             {
+                /* FIXME:
+                 *  This line of code sometimes throws InterruptedException. Cause is unknown as of now
+                 */
                 Thread.sleep(20);
             } catch (InterruptedException e)
             {
@@ -384,7 +393,7 @@ public class PecanServer {
                         }
                         else
                         {
-                            System.out.println("F "+value.getLogEntriesCount());
+                            //System.out.println("F "+value.getLogEntriesCount());
                             List <RpcLogEntry> aeLogs = value.getLogEntriesList();
                             RpcLogEntry firstLog = aeLogs.get(0);
                             LogEntry resultLog = node.getLog(firstLog.getIndex());
@@ -397,10 +406,8 @@ public class PecanServer {
 
                                 System.out.println("Writing to Db..");
                                 new Thread(() ->
-                                {
-                                    node.updateUncommittedLog(value.getLogEntriesList(),
-                                            0, 0);
-                                }).start();
+                                        node.updateUncommittedLog(value.getLogEntriesList(),
+                                                0)).start();
                             }
 
                             else if(resultLog!=null && resultLog.getTerm()==firstLog.getTerm())
@@ -411,14 +418,14 @@ public class PecanServer {
                                 responseObserver.onCompleted();
                                 RpcLogEntry lastRpcLog = value.getLogEntries(value.getLogEntriesCount()-1);
                                 LogEntry lastLog = node.getLastLog();
-                                System.out.println("ll " + lastLog.getIndex()+" "+lastLog.getTerm());
-                                System.out.println("lr "+lastRpcLog.getIndex()+" "+lastRpcLog.getTerm());
+                                //System.out.println("ll " + lastLog.getIndex()+" "+lastLog.getTerm());
+                                //System.out.println("lr "+lastRpcLog.getIndex()+" "+lastRpcLog.getTerm());
                                 if((lastLog.getTerm()!=lastRpcLog.getTerm()) ||
                                         (lastRpcLog.getIndex() != lastLog.getIndex()))
                                 {
                                     System.out.println("Writing to Db..");
                                     node.updateUncommittedLog(value.getLogEntriesList(),
-                                                resultLog.getIndex(), 0);
+                                                resultLog.getIndex());
 
                                 }
                             }
@@ -439,7 +446,7 @@ public class PecanServer {
                 }
                 finally
                 {
-                    System.out.println("Released Locks");
+                    //System.out.println("Released Locks");
                     node.logLock.writeLock().unlock();
                     node.nodeLock.writeLock().unlock();
                 }

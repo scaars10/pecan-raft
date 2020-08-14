@@ -1,4 +1,4 @@
-package com.github.scaars10.pecanraft;
+package com.github.scaars10.pecanraft.dirTest;
 
 import com.github.scaars10.pecanraft.server.PecanConfig;
 import com.github.scaars10.pecanraft.server.PecanServer;

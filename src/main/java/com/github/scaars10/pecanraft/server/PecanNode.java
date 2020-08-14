@@ -29,10 +29,10 @@ public class PecanNode {
     ReentrantReadWriteLock nodeLock = new ReentrantReadWriteLock();
     ReentrantReadWriteLock logLock = new ReentrantReadWriteLock();
     //interval after which leader sends a heartbeat
-    int heartbeat = 50;
+    int heartbeat = 150;
 
     //interval after which follower is allowed to become a candidate if a heartbeat is not received from leader
-    int leaderTimeout = 10000;
+    int leaderTimeout = 2000;
 
     public int getVotedFor() {
         return votedFor.get();
@@ -60,6 +60,7 @@ public class PecanNode {
     public void setCommitIndex(long commitIndex) {
         this.commitIndex = commitIndex;
         db.updateFields(currentTerm, votedFor.get(), commitIndex);
+        writeToKeyValue();
     }
 
     /**
@@ -128,8 +129,8 @@ public class PecanNode {
         //Read logs and state from database
         loadLogs();
         loadFields();
-
         writeMessage("Node created");
+        lastApplied = commitIndex;
 
     }
 
@@ -140,17 +141,19 @@ public class PecanNode {
         return logs.get((int)searchIndex);
     }
 
-
+    /* FIXME:
+        Need to work on Logger
+     */
     public void writeMessage(String message)
     {
         logger.info("Info for Node-{} :- {}",id, message);
     }
-
-    public void writeDebugMsg(String message)
-    {
-
-        logger.debug("Info for Node-{} :- {}",id, message);
-    }
+//
+//    public void writeDebugMsg(String message)
+//    {
+//
+//        logger.debug("Info for Node-{} :- {}",id, message);
+//    }
     public void logError(String message)
     {
         logger.error("Error for Node-{} :- {}",id, message);
@@ -167,7 +170,7 @@ public class PecanNode {
         return res;
     }
 
-    public void updateUncommittedLog(List<RpcLogEntry> list, long nodeMatchIndex, long leaderMatchIndex)
+    public void updateUncommittedLog(List<RpcLogEntry> list, long nodeMatchIndex)
     {
 
         List<LogEntry> rpcLogs =  rpcLogsToLogs(list);
@@ -251,6 +254,9 @@ public class PecanNode {
         return null;
     }
 
+    /* FIXME:
+           This method is buggy
+     */
     public void writeToKeyValue()
     {
         while(lastApplied<=commitIndex)
