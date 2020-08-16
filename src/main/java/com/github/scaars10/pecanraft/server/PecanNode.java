@@ -61,6 +61,7 @@ public class PecanNode {
         this.commitIndex = commitIndex;
         db.updateFields(currentTerm, votedFor.get(), commitIndex);
         writeToKeyValue();
+        System.out.println(commitIndex);
     }
 
     /**
@@ -130,7 +131,7 @@ public class PecanNode {
         loadLogs();
         loadFields();
         writeMessage("Node created");
-        lastApplied = commitIndex;
+
 
     }
 
@@ -205,11 +206,13 @@ public class PecanNode {
             long temp = map.get("votedFor");
             votedFor.set((int) temp);
             commitIndex = map.get("commitIndex");
+            System.out.println("Loaded Fields - CI "+commitIndex);
         }
         else
         {
             db.persistFieldToDb(currentTerm, votedFor.get(), commitIndex);
         }
+        lastApplied = commitIndex;
     }
     public LogEntry getLastLog()
     {
@@ -235,12 +238,12 @@ public class PecanNode {
         List <LogEntry> result = new ArrayList<>();
         while(start<=end)
         {
-            System.out.println(start);
+            //System.out.println(start);
             result.add(logs.get(start));
-            System.out.println("I "+logs.get(start).getIndex());
+            //System.out.println("I "+logs.get(start).getIndex());
             start++;
         }
-        System.out.println("S "+result.size());
+        //System.out.println("S "+result.size());
         return result;
 
     }
@@ -254,12 +257,10 @@ public class PecanNode {
         return null;
     }
 
-    /* FIXME:
-           This method is buggy
-     */
+
     public void writeToKeyValue()
     {
-        while(lastApplied<=commitIndex)
+        while(lastApplied<commitIndex && commitIndex>=0)
         {
             lastApplied++;
             db.addToKeyValueStore(logs.get((int)lastApplied).getKey(), logs.get((int)lastApplied).getValue());
