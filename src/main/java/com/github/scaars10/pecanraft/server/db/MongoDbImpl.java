@@ -10,15 +10,23 @@ import org.bson.Document;
 import org.bson.types.ObjectId;
 
 import java.util.*;
-import java.util.stream.Collectors;
+
 
 import static com.mongodb.client.model.Filters.*;
 
+/**
+ * The type Mongo db.
+ */
 public class MongoDbImpl implements DbBase
 {
     private MongoCollection<Document> commLogCollection,
             uncommLogCollection,logCollection, fieldCollection, keyValueCollection;
 
+    /**
+     * Instantiates a new Mongo db.
+     *
+     * @param id the id
+     */
     public MongoDbImpl(long id)
     {
         MongoClient mongoClient = MongoClients.create("mongodb://localhost:27017");
@@ -150,6 +158,12 @@ public class MongoDbImpl implements DbBase
         //System.out.println("Done Updating fields..");
     }
 
+    /**
+     * Document to log log entry.
+     *
+     * @param doc the doc
+     * @return the log entry
+     */
     public LogEntry documentToLog(Document doc)
     {
         return new LogEntry((long)doc.get("term"),

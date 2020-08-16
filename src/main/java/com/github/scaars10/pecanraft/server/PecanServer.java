@@ -19,18 +19,36 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+/**
+ * The type Pecan server.
+ */
 public class PecanServer {
+    /**
+     * Object running gRpc services .
+     */
     RaftServiceImpl raftService;
+    /**
+     * The gRpc client.
+     */
     RaftGrpcServiceClient rpcClient;
+    /**
+     * The Server thread.
+     */
     Thread serverThread;
     /**
-      Consensus latch is used to make the leader wait before it sends response to client
-        and verify if it is still a leader, it waits for a positive reply from
-        majority of nodes in its AppendEntries routine.
-     **/
+     * Consensus latch is used to make the leader wait before it sends response to client
+     * and verify if it is still a leader, it waits for a positive reply from
+     * majority of nodes in its AppendEntries routine.
+     */
     ResettableCountDownLatch consensusLatch = new ResettableCountDownLatch(1);
 
+    /**
+     * Object to store info about node.
+     */
     PecanNode node;
+    /**
+     * gRpc Server listening to Rpcs...
+     */
     Server server;
 
     //method to start gRpc Server in a separate thread
@@ -61,6 +79,12 @@ public class PecanServer {
     }
 
 
+    /**
+     * Instantiates a new Pecan server.
+     *
+     * @param id     the id
+     * @param config the config
+     */
     public PecanServer(int id, PecanConfig config)
     {
         this.node = new PecanNode(id, config);
@@ -73,12 +97,18 @@ public class PecanServer {
 
     }
 
+    /**
+     * Start.
+     */
     public void start()
     {
         System.out.println("Starting for node "+node.id);
         startFollower();
     }
 
+    /**
+     * Stop leader.
+     */
     void stopLeader()
     {
         node.nodeLock.writeLock().lock();
@@ -86,9 +116,10 @@ public class PecanServer {
         node.nodeLock.writeLock().unlock();
     }
 
-    /** FIXME:
-     *      Method to stop the server but it does not completely stop the server, probably because of
-     *      some gRpc services still running. Only way to stop server as of now is to shut down the program..
+    /**
+     * FIXME:
+     * Method to stop the server but it does not completely stop the server, probably because of
+     * some gRpc services still running. Only way to stop server as of now is to shut down the program..
      */
     public void stop()
     {
@@ -106,19 +137,30 @@ public class PecanServer {
 
     }
 
+    /**
+     * Is running boolean.
+     *
+     * @return the boolean
+     */
     public boolean isRunning()
     {
         return server!=null && !(server.isShutdown() || server.isTerminated());
     }
+
+    /**
+     * The Election executor.
+     */
     ScheduledExecutorService electionExecutor = Executors.newScheduledThreadPool(1);
 
+    /**
+     * The Election future.
+     */
     ScheduledFuture electionFuture;
 
 
     /**
-     * Class for a thread to run in parallel when timer on the node times out and election starts.
+     * Method which implements Leader's functionality
      */
-
     void startLeader()
     {
         System.out.println("New Leader - "+node.id+" in term "+node.getCurrentTerm());
@@ -146,6 +188,9 @@ public class PecanServer {
     }
 
 
+    /**
+     * Method to send AppendEntries rpc to rest of the cluster..
+     */
     void allAppendEntries()
     {
         AtomicInteger successCount = new AtomicInteger(1);
@@ -185,10 +230,18 @@ public class PecanServer {
     }
 
 
+    /**
+     * Start follower.
+     */
     void startFollower()
     {
         startElectionTimer();
     }
+
+
+    /**
+     *  Method to run in parallel when election-timer on the node times out and start new election.
+     */
     void startElection()
     {
         //Startup Election
@@ -291,12 +344,22 @@ public class PecanServer {
 
     }
 
+    /**
+     * Gets dummy log.
+     *
+     * @return the dummy log
+     */
     LogEntry getDummyLog()
     {
 
         return new LogEntry(-1, -1, -1, -1);
 
     }
+
+    /**
+     * Start election timer.
+     */
+
     void  startElectionTimer()
     {
         //System.out.println("Election timer for node "+node.id+" started");
@@ -306,11 +369,19 @@ public class PecanServer {
 
 
     }
+
+    /**
+     * Restart election timer.
+     */
     void restartElectionTimer()
     {
         stopElectionTimer();
         startElectionTimer();
     }
+
+    /**
+     * Stop election timer.
+     */
     void stopElectionTimer()
     {
         if(electionFuture!=null && !(electionFuture.isDone() || electionFuture.isCancelled()))
@@ -319,6 +390,13 @@ public class PecanServer {
     }
 
 
+    /**
+     * Update status.
+     * Updates state of node
+     * @param term        the term
+     * @param leaderId    the leader id
+     * @param newvotedFor the newvoted for
+     */
     public void updateStatus(long term, int leaderId, int newvotedFor)
     {
         node.setCurrentTerm(term);
@@ -330,18 +408,45 @@ public class PecanServer {
             node.setVotedFor(-1);
     }
 
+    /**
+     * Checks if the log is a dummy log.
+     *
+     * @param log the log
+     * @return the boolean
+     */
     public boolean isDummyLog(RpcLogEntry log)
     {
         return log.getIndex() == -1;
     }
 
+    /**
+     * Class extending generated Raft Service Grpc Base.
+     * It implements the server side of the Rpcs in RaftNode.proto
+     */
     public class RaftServiceImpl extends RaftNodeRpcGrpc.RaftNodeRpcImplBase {
+        /**
+         * The Node.
+         */
         PecanNode node;
+
+        /**
+         * Instantiates a new Raft service.
+         *
+         * @param node the node
+         */
         RaftServiceImpl(PecanNode node){
             this.node = node;
         }
 
-        //returns true if the server making the request is behind
+        /**
+         * Checks if server sending is out of date .
+         *
+         * @param term        the term
+         * @param lastIndex   the last index
+         * @param lastLogTerm the last log term
+         * @return the boolean
+         */
+//returns true if the server making the request is behind
         boolean checkIfServerIsBehind(long term, long lastIndex, long lastLogTerm)
         {
             LogEntry lastLog = node.getLastLog();
@@ -353,7 +458,7 @@ public class PecanServer {
                     (lastLog.getTerm() >= lastLogTerm));
         }
 
-
+        //Implementation of server-side Append Entries Rpc.
         @Override
         public StreamObserver<AppendEntriesRequest> appendEntries
                 (StreamObserver<AppendEntriesResponse> responseObserver)
@@ -457,7 +562,7 @@ public class PecanServer {
                 }
                 finally
                 {
-                    //System.out.println("Released Locks");
+                    //Release all locks before returning..
                     node.logLock.writeLock().unlock();
                     node.nodeLock.writeLock().unlock();
                 }
@@ -476,6 +581,7 @@ public class PecanServer {
         };
         }
 
+        //Implementation of Server-side RequestVote Rpc..
         @Override
         public void requestVote(com.github.scaars10.pecanraft.RequestVoteRequest request,
                 StreamObserver<com.github.scaars10.pecanraft.RequestVoteResponse> responseObserver)
@@ -515,6 +621,9 @@ public class PecanServer {
             }
         }
 
+        /** Implementation of server-side of the Rpc which gives clients access to the service that the system
+            is providing
+         */
         @Override
         public void systemService(ClientRequest request, StreamObserver<ClientResponse> responseObserver) {
             ClientResponse response;
@@ -570,14 +679,33 @@ public class PecanServer {
         }
     }
 
+    /**
+     * Class providing implementation of the client-side of the Rpcs internal to the Raft algorithm.
+     */
     public class RaftGrpcServiceClient
     {
+        /**
+         * The Node.
+         */
         PecanNode node;
+
+        /**
+         * Instantiates a new Raft grpc service client.
+         *
+         * @param node the node
+         */
         public RaftGrpcServiceClient(PecanNode node)
         {
             this.node = node;
         }
 
+        /**
+         * Request vote request vote response.
+         *
+         * @param address the address
+         * @param nodeId  the node id
+         * @return the request vote response
+         */
         public RequestVoteResponse requestVote(String address, int nodeId)
         {
             ManagedChannel channel = ManagedChannelBuilder
@@ -604,6 +732,13 @@ public class PecanServer {
 
         }
 
+        /**
+         * Append entries.
+         *
+         * @param address      the address
+         * @param nodeId       the node id
+         * @param successCount the success count
+         */
         public void appendEntries(String address, int nodeId, AtomicInteger successCount)
         {
             CountDownLatch latch = new CountDownLatch(1);
