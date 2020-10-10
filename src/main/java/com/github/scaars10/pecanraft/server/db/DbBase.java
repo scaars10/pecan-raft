@@ -1,7 +1,6 @@
 package com.github.scaars10.pecanraft.server.db;
 
 import com.github.scaars10.pecanraft.structures.LogEntry;
-import javafx.util.Pair;
 
 import java.util.List;
 import java.util.Map;
@@ -11,12 +10,6 @@ import java.util.Map;
  */
 public interface DbBase
 {
-    /**
-     * Write committed logs to db.
-     *
-     * @param logs the logs
-     */
-    void writeCommittedLogs(List<LogEntry> logs);
 
     /**
      * Write logs to db.
@@ -40,12 +33,6 @@ public interface DbBase
      */
     void deleteLogs(long startIndex, long endIndex);
 
-    /**
-     * Write uncommitted logs.
-     *
-     * @param logs the logs
-     */
-    void writeUncommittedLogs(List<LogEntry> logs);
 
     /**
      * Persist fields to db.
@@ -65,19 +52,7 @@ public interface DbBase
      */
     void updateFields(long currentTerm, int votedFor, long commitIndex);
 
-    /**
-     * Read comm logs from db list.
-     *
-     * @return the list
-     */
-    List<LogEntry> readCommLogsFromDb();
 
-    /**
-     * Read un comm logs from db list.
-     *
-     * @return the list
-     */
-    List<LogEntry> readUnCommLogsFromDb();
 
     /**
      * Gets fields.

@@ -7,7 +7,7 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 
 import org.bson.Document;
-import org.bson.types.ObjectId;
+
 
 import java.util.*;
 
@@ -19,8 +19,7 @@ import static com.mongodb.client.model.Filters.*;
  */
 public class MongoDbImpl implements DbBase
 {
-    private MongoCollection<Document> commLogCollection,
-            uncommLogCollection,logCollection, fieldCollection, keyValueCollection;
+    private MongoCollection<Document> logCollection, fieldCollection, keyValueCollection;
 
     /**
      * Instantiates a new Mongo db.
@@ -31,28 +30,13 @@ public class MongoDbImpl implements DbBase
     {
         MongoClient mongoClient = MongoClients.create("mongodb://localhost:27017");
         MongoDatabase database = mongoClient.getDatabase("pecanDb");
-        commLogCollection = database.getCollection("node_committedLog_"+id);
         logCollection = database.getCollection("node_"+id+"_logs");
-        uncommLogCollection = database.getCollection("node_uncommittedLog_"+id);
         fieldCollection = database.getCollection("node_field_"+id);
         keyValueCollection = database.getCollection("node_store_"+id);
         System.out.println("Initialized Database connections");
     }
 
-    @Override
-    public void writeCommittedLogs(List<LogEntry> logs)
-    {
-        //dbLock.writeLock().lock();
-        logs.parallelStream().forEach((log)->
-        {
-            Document doc = new Document("index", new ObjectId(String.valueOf(log.getIndex())))
-                    .append("term", log.getTerm())
-                    .append("value", log.getValue()).append("key", log.getKey());
-            commLogCollection.insertOne(doc);
-        });
-        //dbLock.writeLock().unlock();
 
-    }
 
     @Override
     public void writeLog(LogEntry log)
@@ -79,9 +63,7 @@ public class MongoDbImpl implements DbBase
             return null;
         logCollection.find().iterator().forEachRemaining(log-> list.add(documentToLog(log)));
         list.sort((a, b) ->
-        {
-            return (int) (a.getIndex() - b.getIndex());
-        });
+                (int) (a.getIndex() - b.getIndex()));
         list.forEach((el)-> System.out.println("El1 -"+el.getIndex()));
         //dbLock.readLock().unlock();
         return list;
@@ -97,19 +79,7 @@ public class MongoDbImpl implements DbBase
         System.out.println("collection count "+logCollection.countDocuments());
     }
 
-    @Override
-    public void writeUncommittedLogs(List<LogEntry> logs)
-    {
-        //dbLock.writeLock().lock();
-        logs.parallelStream().forEach((log)->
-        {
-            Document doc = new Document("index", new ObjectId(String.valueOf(log.getIndex())))
-                    .append("term", log.getTerm())
-                    .append("value", log.getValue()).append("key", log.getKey());
-            uncommLogCollection.insertOne(doc);
-        });
-        //dbLock.writeLock().unlock();
-    }
+
 
     @Override
     public void persistFieldToDb(long currentTerm, int votedFor, long commitIndex)
@@ -170,29 +140,9 @@ public class MongoDbImpl implements DbBase
                 (int)doc.get("key"), (int)doc.get("value"), (long) doc.get("index"));
     }
 
-    @Override
-    public List<LogEntry> readCommLogsFromDb()
-    {
-        //dbLock.readLock().lock();
-        List <LogEntry> list = new ArrayList<>();
-        if(commLogCollection.countDocuments()==0)
-            return null;
-        commLogCollection.find().iterator().forEachRemaining(log-> list.add(documentToLog(log)));
-        //dbLock.readLock().unlock();
-        return list;
-    }
 
-    @Override
-    public List<LogEntry> readUnCommLogsFromDb()
-    {
-        //dbLock.readLock().lock();
-        List <LogEntry> list = new ArrayList<>();
-        if(uncommLogCollection.countDocuments()==0)
-            return null;
-        uncommLogCollection.find().iterator().forEachRemaining(log-> list.add(documentToLog(log)));
-        //dbLock.readLock().unlock();
-        return list;
-    }
+
+
 
     @Override
     public Map<String, Long> getFields()

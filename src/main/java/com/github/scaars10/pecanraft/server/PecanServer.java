@@ -213,7 +213,7 @@ public class PecanServer {
         for(int i=0;i<20;i++)
         {
             try {
-                Thread.sleep(40);
+                Thread.sleep(70);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
@@ -222,6 +222,7 @@ public class PecanServer {
                 node.nodeLock.writeLock().lock();
                 node.setCommitIndex(currentSize);
                 node.nodeLock.writeLock().unlock();
+                break;
             }
 
         }
